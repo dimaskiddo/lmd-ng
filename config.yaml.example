@@ -1,0 +1,65 @@
+# LMD-NG (Linux Malware Detect - Next Generation) Configuration Example
+# This file contains the default configuration values for LMD-NG.
+# Copy this file to `config.yaml` to customize your settings.
+
+app:
+  name: "lmd-ng"
+  version: "0.0.1"
+
+logging:
+  level: "info"
+  output: "file"
+  filepath: "./logs/lmd-ng.log"
+  max_size: 10
+  max_backups: 7
+  max_age: 1
+  compress: true
+
+monitor:
+  paths:
+    - "/home"
+    - "/var/www"
+  exclude_dirs:
+    - "/proc"
+    - "/sys"
+    - "/dev"
+
+quarantine:
+  enabled: true
+  path: "./quarantine"
+  enable_encryption: true
+  encryption_key: "CHANGE-THIS-TO-YOUR-SECRET-KEY"
+
+scanner:
+  signature_path: "./sigs"
+  clamav_enabled: false
+  clamav_db_path: "./clamav"
+  clamav_hex_depth: 65536
+  min_filesize: 0
+  max_filesize: "20M"
+  max_depth: 0
+  hex_depth: 20000
+  cpu_limit: 0
+  ignore_root: true
+  ignore_users:
+    - "root"
+  ignore_groups:
+    - "root"
+  include_regex: ""
+  exclude_regex: ""
+
+scheduler:
+  update_interval: "@daily"
+  scan_interval: "@every 4h"
+
+updater:
+  auto_update_signatures: true
+  remote_uri_timeout: "30s"
+  signature_pack_url: "https://cdn.rfxn.com/downloads/maldet-sigpack.tgz"
+  signature_version_url: "https://cdn.rfxn.com/downloads/maldet.sigs.ver"
+  clamav_update_enabled: false
+  clamav_mirror_url: "https://database.clamav.net"
+  clamav_databases:
+    - "daily.cvd"
+    - "main.cvd"
+    - "bytecode.cvd"
