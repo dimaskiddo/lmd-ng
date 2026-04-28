@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
@@ -33,10 +34,24 @@ type Metadata struct {
 	Nonce          []byte `json:"nonce,omitempty"`          // Nonce used for GCM encryption
 }
 
+// ListEntry is a summary of a single quarantined file returned by List.
+type ListEntry struct {
+	// ID is the full 32-character hex UUID embedded in the quarantine filename.
+	ID string
+	// ShortID is the first 8 characters of ID, used for convenient CLI references.
+	ShortID string
+	OriginalPath   string
+	QuarantinePath string
+	DetectionInfo  string
+	Encrypted      bool
+}
+
 // Manager defines the interface for quarantine operations.
 type Manager interface {
 	Quarantine(ctx context.Context, filePath string, detectionInfo string) (string, error)
 	Restore(ctx context.Context, quarantinePath string) (string, error)
+	List(ctx context.Context) ([]ListEntry, error)
+	ResolveByID(id string) (string, error)
 }
 
 // QuarantineManager implements the Manager interface.
@@ -189,11 +204,26 @@ func (qm *QuarantineManager) Restore(ctx context.Context, quarantinePath string)
 		return "", fmt.Errorf("failed to unmarshal quarantine metadata from %s: %w", metadataFilePath, err)
 	}
 
+	// The quarantined file was locked to 0o000 permissions at quarantine time.
+	// Temporarily grant owner-read so we can open it for decryption or direct move.
+	// If anything goes wrong after this point we re-lock the file before returning.
+	if err := os.Chmod(quarantinePath, 0o400); err != nil {
+		return "", fmt.Errorf("failed to grant read permission on quarantined file %s before restore: %w", quarantinePath, err)
+	}
+
+	// lockDown is a best-effort cleanup called on any error after the chmod above.
+	lockDown := func() {
+		if chmodErr := os.Chmod(quarantinePath, filePerm); chmodErr != nil {
+			log.Warn("Failed to re-lock quarantined file after restore error", "file", quarantinePath, "error", chmodErr)
+		}
+	}
+
 	// The path to the file that will be restored (could be encrypted or not)
 	fileToRestorePath := quarantinePath
 
 	if qm.cfg.EnableEncryption && len(metadata.EncryptionKey) > 0 && len(metadata.Nonce) > 0 {
 		if qm.cfg.EncryptionKey == "" {
+			lockDown()
 			return "", fmt.Errorf("quarantine encryption is enabled but encryption_key is empty in config")
 		}
 
@@ -202,32 +232,39 @@ func (qm *QuarantineManager) Restore(ctx context.Context, quarantinePath string)
 		// Decrypt the file key with the master key
 		fileKey, err := qm.decryptKeyWithMaster(metadata.EncryptionKey, masterKey)
 		if err != nil {
+			lockDown()
 			return "", fmt.Errorf("failed to decrypt file encryption key: %w", err)
 		}
 
 		// Decrypt the file content. The encrypted file is at `quarantinePath`.
+		// decryptFile opens the file with the read permission we just granted and writes
+		// the plaintext to a temporary .dec.tmp file alongside the quarantined file.
 		decryptedFilePath, err := qm.decryptFile(quarantinePath, fileKey, metadata.Nonce)
 		if err != nil {
+			lockDown()
 			return "", fmt.Errorf("failed to decrypt quarantined file %s: %w", quarantinePath, err)
 		}
 
 		fileToRestorePath = decryptedFilePath
 	}
 
-	// Restore default permissions (e.g., 0o644 for files). A more robust solution
-	// would store original permissions in metadata.
+	// Restore default permissions on the file that is about to move back.
+	// A more robust solution would store original permissions in metadata.
 	if err := os.Chmod(fileToRestorePath, 0o644); err != nil {
 		log.Warn("Failed to restore default permissions on restored file", "file", fileToRestorePath, "error", err)
 	}
 
 	// Move the file back to its original path (handles cross-device moves)
 	if err := moveFile(fileToRestorePath, metadata.OriginalPath); err != nil {
+		lockDown()
 		return "", fmt.Errorf("failed to move file %s to original path %s: %w", fileToRestorePath, metadata.OriginalPath, err)
 	}
 
 	log.Info("File restored", "quarantine_path", quarantinePath, "original_path", metadata.OriginalPath)
 
-	// Clean up quarantined file and metadata file
+	// Clean up quarantined file and metadata file.
+	// The encrypted source was already removed inside decryptFile; this handles the
+	// non-encrypted case (or any leftover) and always removes the metadata sidecar.
 	if err := os.Remove(quarantinePath); err != nil && !os.IsNotExist(err) {
 		log.Warn("Failed to remove quarantined file after restoration", "file", quarantinePath, "error", err)
 	}
@@ -237,6 +274,132 @@ func (qm *QuarantineManager) Restore(ctx context.Context, quarantinePath string)
 	}
 
 	return metadata.OriginalPath, nil
+}
+
+// List returns a summary of all quarantined files by scanning the quarantine directory
+// for *.metadata.json sidecar files. Each entry includes a short, human-readable ID
+// (first 8 characters of the UUID) that can be passed to ResolveByID for restore operations.
+func (qm *QuarantineManager) List(ctx context.Context) ([]ListEntry, error) {
+	entries, err := os.ReadDir(qm.cfg.Path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Quarantine directory not yet created — return empty list gracefully.
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read quarantine directory %s: %w", qm.cfg.Path, err)
+	}
+
+	var list []ListEntry
+	for _, de := range entries {
+		select {
+		case <-ctx.Done():
+			return list, ctx.Err()
+		default:
+		}
+
+		name := de.Name()
+		if de.IsDir() || !strings.HasSuffix(name, ".quarantined.metadata.json") {
+			continue
+		}
+
+		metadataPath := filepath.Join(qm.cfg.Path, name)
+
+		data, err := os.ReadFile(metadataPath)
+		if err != nil {
+			log.Warn("Failed to read quarantine metadata file, skipping", "file", metadataPath, "error", err)
+			continue
+		}
+
+		var meta Metadata
+		if err := json.Unmarshal(data, &meta); err != nil {
+			log.Warn("Failed to parse quarantine metadata file, skipping", "file", metadataPath, "error", err)
+			continue
+		}
+
+		// Extract the UUID from the metadata filename:
+		// Format: <original_name>.<uuid>.quarantined.metadata.json
+		// We strip the suffix and then take the last dot-delimited segment as the ID.
+		baseName := strings.TrimSuffix(name, ".quarantined.metadata.json")
+		id := ""
+		if idx := strings.LastIndex(baseName, "."); idx >= 0 {
+			id = baseName[idx+1:]
+		}
+
+		shortID := id
+		if len(id) >= 8 {
+			shortID = id[:8]
+		}
+
+		encrypted := len(meta.EncryptionKey) > 0 && len(meta.Nonce) > 0
+
+		list = append(list, ListEntry{
+			ID:             id,
+			ShortID:        shortID,
+			OriginalPath:   meta.OriginalPath,
+			QuarantinePath: meta.QuarantinePath,
+			DetectionInfo:  meta.DetectionInfo,
+			Encrypted:      encrypted,
+		})
+	}
+
+	return list, nil
+}
+
+// ResolveByID resolves a quarantine path from a user-supplied identifier which may be:
+//   - An absolute path to the quarantined file (returned as-is after existence check).
+//   - A full 32-character hex ID matching the UUID in the quarantine filename.
+//   - A short ID (prefix of the full ID, minimum 4 characters) that uniquely matches
+//     exactly one quarantine entry.
+//
+// Returns the absolute quarantine path and an error if the ID is ambiguous, not found,
+// or too short.
+func (qm *QuarantineManager) ResolveByID(id string) (string, error) {
+	// If the caller provided an absolute path that exists, use it directly.
+	if filepath.IsAbs(id) {
+		if _, err := os.Stat(id); err == nil {
+			return id, nil
+		}
+	}
+
+	if len(id) < 4 {
+		return "", fmt.Errorf("ID %q is too short; provide at least 4 characters of the quarantine ID", id)
+	}
+
+	entries, err := os.ReadDir(qm.cfg.Path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("quarantine directory %s does not exist", qm.cfg.Path)
+		}
+		return "", fmt.Errorf("failed to read quarantine directory: %w", err)
+	}
+
+	var matches []string
+	for _, de := range entries {
+		name := de.Name()
+		if de.IsDir() || !strings.HasSuffix(name, ".quarantined") {
+			continue
+		}
+
+		// Extract UUID from filename: <original_name>.<uuid>.quarantined
+		baseName := strings.TrimSuffix(name, ".quarantined")
+		entryID := ""
+		if idx := strings.LastIndex(baseName, "."); idx >= 0 {
+			entryID = baseName[idx+1:]
+		}
+
+		if strings.HasPrefix(entryID, id) {
+			matches = append(matches, filepath.Join(qm.cfg.Path, name))
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no quarantined file found matching ID %q", id)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("ambiguous ID %q matches %d quarantine entries; use more characters", id, len(matches))
+	}
 }
 
 // encryptFile encrypts a file using AES256-GCM and returns the path to the encrypted temporary file, the nonce, and an error.

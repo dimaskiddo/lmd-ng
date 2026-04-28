@@ -95,6 +95,7 @@ func init() {
 	rootCmd.AddCommand(scanCmd())
 	rootCmd.AddCommand(updateCmd())
 	rootCmd.AddCommand(serviceCmd())
+	rootCmd.AddCommand(quarantineCmd())
 	rootCmd.AddCommand(versionCmd())
 
 	if err := rootCmd.Execute(); err != nil {
