@@ -1,4 +1,4 @@
-# 🛡️ Linux Malware Detect Next Generation (LMD-NG) 🚀
+# 🛡️ Linux Malware Detect Next Generation (LMD-NG)
 
 Welcome to the future of multi-platform security! **LMD-NG** is a complete, ground-up rewrite of the legendary **Linux Malware Detect (LMD/MalDet)**. While the original LMD was built specifically for Linux, **LMD-NG** brings that same battle-tested logic to **Windows** and **macOS**, supercharged with the speed, safety, and modern features of **Pure Golang**! 🐹✨
 
@@ -46,7 +46,8 @@ Ready to containerize your security? We've got you covered!
       -v <PATH_TO_BE_SCANNED_OR_MONITORED>:/data:rw \
       --name lmd-ng \
       --restart unless-stopped \
-      dimaskiddo/lmd-ng:latest
+      dimaskiddo/lmd-ng:latest \
+      lmd-ng daemon --config /usr/app/lmd-ng/config.yaml
     ```
 
 ### 📦 **Using Pre-Built Binaries**
