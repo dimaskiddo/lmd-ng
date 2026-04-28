@@ -101,6 +101,7 @@ LMD-NG comes with a powerful CLI. Here are the most common commands:
 *   **`lmd-ng quarantine list`**: List all files currently in quarantine. 📋
 *   **`lmd-ng quarantine add <file>`**: Manually move a suspicious file to quarantine. 📥
 *   **`lmd-ng quarantine restore <id|path>`**: Restore a file from quarantine to its original location. 📤
+*   **`lmd-ng quarantine remove <id|path>`**: Permanently delete a quarantined file (requires `--force`). 🗑️
 *   **`lmd-ng service install`**: Automatically register LMD-NG as a background service (supports Windows Services, macOS Launchd, and Linux Systemd/Upstart). ⚙️
 *   **`lmd-ng service uninstall`**: Cleanly remove the system service. 🧹
 *   **`lmd-ng version`**: Display the version information. ℹ️
