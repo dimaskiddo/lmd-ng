@@ -33,9 +33,10 @@ func InstallService(cfg *config.Config) error {
 	svcConfig := &kservice.Config{
 		Name:             "lmd-ng",
 		DisplayName:      "LMD-NG Resident Monitoring",
-		Description:      "Linux Malware Detect Next Generation",
-		Arguments:        []string{"daemon"},
+		Description:      "Linux Malware Detect Next Generation (LMD-NG)",
+		UserName:         "root",
 		WorkingDirectory: filepath.Dir(exePath),
+		Arguments:        []string{"daemon"},
 	}
 
 	svc, err := kservice.New(&LMDService{}, svcConfig)

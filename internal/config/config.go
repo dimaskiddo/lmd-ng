@@ -18,8 +18,6 @@ type Config struct {
 
 // AppConfig holds application-wide settings.
 type AppConfig struct {
-	Name          string `yaml:"name" mapstructure:"name"`
-	Version       string `yaml:"version" mapstructure:"version"`
 	BasePath      string `yaml:"base_path" mapstructure:"base_path"`
 	SignaturesDir string `yaml:"signatures_dir" mapstructure:"signatures_dir"`
 	ClamAVDir     string `yaml:"clamav_dir" mapstructure:"clamav_dir"`
@@ -89,12 +87,9 @@ type UpdaterConfig struct {
 
 // SetDefaultConfig sets default values for the configuration
 func SetDefaultConfig(config *Config) {
-	config.App.Name = "lmd-ng"
-	config.App.Version = "0.1.0"
-
 	config.App.BasePath = "."
-	config.App.ClamAVDir = filepath.Join(config.App.BasePath, "clamav")
 	config.App.SignaturesDir = filepath.Join(config.App.BasePath, "sigs")
+	config.App.ClamAVDir = filepath.Join(config.App.BasePath, "clamav")
 	config.App.QuarantineDir = filepath.Join(config.App.BasePath, "quarantine")
 	config.App.LogsDir = filepath.Join(config.App.BasePath, "logs")
 
@@ -126,7 +121,7 @@ func SetDefaultConfig(config *Config) {
 	config.Scanner.HexDepth = 20000
 	config.Scanner.CPULimit = 0
 
-	config.Scanner.IgnoreRoot = true
+	config.Scanner.IgnoreRoot = false
 	config.Scanner.IgnoreUsers = []string{"root"}
 	config.Scanner.IgnoreGroups = []string{"root"}
 
@@ -138,11 +133,13 @@ func SetDefaultConfig(config *Config) {
 
 	config.Updater.AutoUpdateSignatures = true
 	config.Updater.RemoteURITimeout = "30s"
+
 	config.Updater.SignaturePackURL = "https://www.rfxn.com/downloads/maldet-sigpack.tgz"
 	config.Updater.SignatureVersionURL = "https://www.rfxn.com/downloads/maldet-sigpack.ver"
+
 	config.Updater.ClamAVUpdateEnabled = false
 	config.Updater.ClamAVMirrorURL = "https://database.clamav.net"
-	config.Updater.ClamAVDatabases = []string{"daily.cvd", "main.cvd", "bytecode.cvd"}
+	config.Updater.ClamAVDatabases = []string{"daily.cvd", "bytecode.cvd", "main.cvd"}
 }
 
 // EnsureDirectories creates all required application directories based on

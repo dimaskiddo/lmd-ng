@@ -3,8 +3,11 @@
 # Copy this file to `config.yaml` to customize your settings.
 
 app:
-  name: "lmd-ng"
-  version: "0.0.1"
+  base_path: "."
+  signatures_dir: "./sigs"
+  clamav_dir: "./clamav"
+  quarantine_dir: "./quarantine"
+  logs_dir: "./logs"
 
 logging:
   level: "info"
@@ -36,11 +39,11 @@ scanner:
   clamav_db_path: "./clamav"
   clamav_hex_depth: 65536
   min_filesize: 0
-  max_filesize: "20M"
+  max_filesize: 20M
   max_depth: 0
   hex_depth: 20000
   cpu_limit: 0
-  ignore_root: true
+  ignore_root: false
   ignore_users:
     - "root"
   ignore_groups:
@@ -54,7 +57,6 @@ scheduler:
 
 updater:
   auto_update_signatures: true
-  remote_uri_timeout: "30s"
   signature_pack_url: "https://cdn.rfxn.com/downloads/maldet-sigpack.tgz"
   signature_version_url: "https://cdn.rfxn.com/downloads/maldet.sigs.ver"
   clamav_update_enabled: false
