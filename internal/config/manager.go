@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/fsnotify/fsnotify"
@@ -10,6 +11,31 @@ import (
 
 	"github.com/dimaskiddo/lmd-ng/internal/log"
 )
+
+// executableDir returns the absolute directory that contains the running
+// binary, following any symlinks. Falls back to the process working directory
+// when the executable path cannot be determined.
+func executableDir() string {
+	exePath, err := os.Executable()
+	if err != nil {
+		// Fallback: use the current working directory
+		cwd, wdErr := os.Getwd()
+		if wdErr != nil {
+			return "."
+		}
+		return cwd
+	}
+
+	// Resolve symlinks so that e.g. /usr/local/bin/lmd-ng -> /usr/local/lmd-ng/lmd-ng
+	// is handled correctly.
+	realPath, err := filepath.EvalSymlinks(exePath)
+	if err != nil {
+		// If symlink resolution fails, use the raw executable path
+		realPath = exePath
+	}
+
+	return filepath.Dir(realPath)
+}
 
 // Manager handles loading, parsing, and watching configuration.
 type Manager struct {
@@ -26,8 +52,28 @@ func NewConfigManager(configFilePath string) (*Manager, error) {
 		ConfigChangeChan: make(chan struct{}, 1),
 	}
 
-	// Set default values directly on the Config struct
+	// Resolve the binary's own directory first; all relative defaults are
+	// anchored here so that lmd-ng works correctly regardless of the CWD
+	// from which the operator invokes it.
+	binDir := executableDir()
+
+	// Set default values directly on the Config struct, using the binary
+	// directory as the base path instead of "."
 	SetDefaultConfig(m.Config)
+	m.Config.App.BasePath = binDir
+
+	// Re-derive subdirectory defaults that depend on BasePath so they also
+	// point at the binary directory.
+	m.Config.App.SignaturesDir = filepath.Join(binDir, "sigs")
+	m.Config.App.ClamAVDir = filepath.Join(binDir, "clamav")
+	m.Config.App.QuarantineDir = filepath.Join(binDir, "quarantine")
+	m.Config.App.LogsDir = filepath.Join(binDir, "logs")
+
+	m.Config.Logging.FilePath = filepath.Join(m.Config.App.LogsDir, "lmd-ng.log")
+
+	m.Config.Quarantine.Path = m.Config.App.QuarantineDir
+	m.Config.Scanner.SignaturePath = m.Config.App.SignaturesDir
+	m.Config.Scanner.ClamAVDBPath = m.Config.App.ClamAVDir
 
 	// Configure Viper to read from the specified path or default locations
 	if configFilePath != "" {
@@ -36,9 +82,13 @@ func NewConfigManager(configFilePath string) (*Manager, error) {
 		m.Viper.SetConfigName("config")
 		m.Viper.SetConfigType("yaml")
 
-		m.Viper.AddConfigPath(".")
+		// Search order: binary's own directory first, then system-wide paths.
+		// Deliberately excluded "."/CWD to avoid ambiguity when the operator
+		// runs lmd-ng from an unrelated directory.
+		m.Viper.AddConfigPath(binDir)
 		m.Viper.AddConfigPath("/etc/lmd-ng/")
 		m.Viper.AddConfigPath("/usr/local/etc/lmd-ng/")
+		m.Viper.AddConfigPath("/usr/local/lmd-ng/")
 	}
 
 	// Read configuration
@@ -56,8 +106,11 @@ func NewConfigManager(configFilePath string) (*Manager, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
-	// Resolve absolute paths for application directories
-	m.Config.App.BasePath, _ = filepath.Abs(m.Config.App.BasePath)
+	// After Viper unmarshalling, if the config file set a relative BasePath
+	// resolve it against the binary directory (not CWD) so it remains stable.
+	if !filepath.IsAbs(m.Config.App.BasePath) {
+		m.Config.App.BasePath = filepath.Join(binDir, m.Config.App.BasePath)
+	}
 
 	return m, nil
 }
@@ -78,8 +131,11 @@ func (m *Manager) WatchConfig(ctx context.Context) {
 		// Update the manager's config with the new one
 		m.Config = newConfig
 
-		// Resolve absolute paths for application directories again
-		m.Config.App.BasePath, _ = filepath.Abs(m.Config.App.BasePath)
+		// Resolve absolute paths for application directories again,
+		// anchoring relative paths to the binary directory rather than CWD.
+		if !filepath.IsAbs(m.Config.App.BasePath) {
+			m.Config.App.BasePath = filepath.Join(executableDir(), m.Config.App.BasePath)
+		}
 
 		// Notify listeners about config change
 		select {

@@ -41,7 +41,7 @@ func init() {
 
 	rootCmd := &cobra.Command{
 		Use:   "lmd-ng",
-		Short: "LMD-NG: Next Generation Linux Malware Detect",
+		Short: "Linux Malware Detect Next Generation (LMD-NG)",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if cfgFile != "" {
 				cfgMgr.Viper.SetConfigFile(cfgFile)
