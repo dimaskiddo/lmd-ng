@@ -39,7 +39,7 @@ type ListEntry struct {
 	// ID is the full 32-character hex UUID embedded in the quarantine filename.
 	ID string
 	// ShortID is the first 8 characters of ID, used for convenient CLI references.
-	ShortID string
+	ShortID        string
 	OriginalPath   string
 	QuarantinePath string
 	DetectionInfo  string
@@ -52,6 +52,7 @@ type Manager interface {
 	Restore(ctx context.Context, quarantinePath string) (string, error)
 	List(ctx context.Context) ([]ListEntry, error)
 	ResolveByID(id string) (string, error)
+	Remove(ctx context.Context, quarantinePath string) error
 }
 
 // QuarantineManager implements the Manager interface.
@@ -400,6 +401,49 @@ func (qm *QuarantineManager) ResolveByID(id string) (string, error) {
 	default:
 		return "", fmt.Errorf("ambiguous ID %q matches %d quarantine entries; use more characters", id, len(matches))
 	}
+}
+
+// Remove permanently deletes a quarantined file and its metadata sidecar from the
+// quarantine directory. This is a destructive, irreversible operation — the original
+// file cannot be recovered after this call.
+//
+// Because quarantined files are locked to 0o000 permissions, Remove temporarily
+// grants owner-write (0o200) so that os.Remove can unlink the file. If the removal
+// fails the file is re-locked to 0o000 to leave the quarantine store consistent.
+func (qm *QuarantineManager) Remove(ctx context.Context, quarantinePath string) error {
+	metadataFilePath := quarantinePath + ".metadata.json"
+
+	// Verify the quarantine entry exists before doing anything.
+	if _, err := os.Stat(quarantinePath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("quarantined file not found: %s", quarantinePath)
+		}
+
+		return fmt.Errorf("failed to stat quarantined file %s: %w", quarantinePath, err)
+	}
+
+	// Grant owner-write so os.Remove can unlink the locked file.
+	if err := os.Chmod(quarantinePath, 0o200); err != nil {
+		return fmt.Errorf("failed to grant write permission on quarantined file %s before removal: %w", quarantinePath, err)
+	}
+
+	if err := os.Remove(quarantinePath); err != nil {
+		// Re-lock the file to keep the quarantine store consistent.
+		if chmodErr := os.Chmod(quarantinePath, filePerm); chmodErr != nil {
+			log.Warn("Failed to re-lock quarantined file after removal error", "file", quarantinePath, "error", chmodErr)
+		}
+
+		return fmt.Errorf("failed to remove quarantined file %s: %w", quarantinePath, err)
+	}
+
+	// Remove the metadata sidecar. A missing sidecar is logged but not fatal —
+	// the quarantine file itself has already been deleted.
+	if err := os.Remove(metadataFilePath); err != nil && !os.IsNotExist(err) {
+		log.Warn("Failed to remove quarantine metadata file", "file", metadataFilePath, "error", err)
+	}
+
+	log.Info("Quarantined file permanently removed", "quarantine_path", quarantinePath)
+	return nil
 }
 
 // encryptFile encrypts a file using AES256-GCM and returns the path to the encrypted temporary file, the nonce, and an error.

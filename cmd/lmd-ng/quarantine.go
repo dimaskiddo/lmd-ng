@@ -23,6 +23,7 @@ func quarantineCmd() *cobra.Command {
 	cmd.AddCommand(quarantineListCmd())
 	cmd.AddCommand(quarantineAddCmd())
 	cmd.AddCommand(quarantineRestoreCmd())
+	cmd.AddCommand(quarantineRemoveCmd())
 
 	return cmd
 }
@@ -156,4 +157,60 @@ The argument can be:
 			log.Info("File restored successfully", "restored_to", originalPath)
 		},
 	}
+}
+
+// quarantineRemoveCmd returns the `quarantine remove <id|path>` subcommand.
+// It permanently deletes a quarantined file and its metadata sidecar.
+// A --force flag is required to proceed, acting as a safety confirmation gate
+// since this operation is irreversible and the original file cannot be recovered.
+func quarantineRemoveCmd() *cobra.Command {
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "remove <id|path>",
+		Short: "Permanently delete a quarantined file",
+		Long: `Permanently delete a quarantined file and its metadata record.
+
+WARNING: This operation is irreversible. The original file cannot be recovered.
+
+The argument can be:
+  - A short ID (shown in 'quarantine list', minimum 4 chars)
+  - A full 32-character quarantine ID
+  - An absolute path to the quarantined file
+
+You must pass --force to confirm the deletion.`,
+		Args: cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			if !force {
+				fmt.Fprintln(os.Stderr, "ERROR: quarantine remove is irreversible. Pass --force to confirm permanent deletion.")
+				os.Exit(1)
+			}
+
+			ref := args[0]
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			cfg := cfgMgr.GetConfig()
+			qm := quarantine.NewQuarantineManager(&cfg.Quarantine)
+
+			// Resolve the reference to an absolute quarantine path.
+			quarantinePath, err := qm.ResolveByID(ref)
+			if err != nil {
+				log.Error("Failed to resolve quarantine entry", "ref", ref, "error", err)
+				os.Exit(1)
+			}
+
+			if err := qm.Remove(ctx, quarantinePath); err != nil {
+				log.Error("Failed to remove quarantined file", "quarantine_path", quarantinePath, "error", err)
+				os.Exit(1)
+			}
+
+			log.Info("Quarantined file permanently deleted", "quarantine_path", quarantinePath)
+		},
+	}
+
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Confirm permanent deletion (required)")
+
+	return cmd
 }
