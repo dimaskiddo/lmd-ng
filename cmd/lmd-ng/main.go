@@ -89,7 +89,7 @@ func init() {
 		},
 	}
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "path to configuration file (default is config.yaml in current dir, /etc/lmd-ng/, or /usr/local/etc/lmd-ng/)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "path to configuration file (default is config.yaml in current dir, /etc/lmd-ng/, /usr/local/etc/lmd-ng/, or /usr/local/lmd-ng/)")
 
 	rootCmd.AddCommand(daemonCmd())
 	rootCmd.AddCommand(scanCmd())
