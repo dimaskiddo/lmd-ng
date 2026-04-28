@@ -61,5 +61,5 @@ updater:
   clamav_mirror_url: "https://database.clamav.net"
   clamav_databases:
     - "daily.cvd"
-    - "main.cvd"
     - "bytecode.cvd"
+    - "main.cvd"

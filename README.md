@@ -1,8 +1,8 @@
 # 🛡️ Linux Malware Detect Next Generation (LMD-NG) 🚀
 
-Welcome to the future of Linux security! **LMD-NG** is a complete, ground-up rewrite of the legendary **Linux Malware Detect (LMD/MalDet)**. We've taken the battle-tested logic of the original Bash-based tool and supercharged it with the speed, safety, and modern features of **Pure Golang**! 🐹✨
+Welcome to the future of multi-platform security! **LMD-NG** is a complete, ground-up rewrite of the legendary **Linux Malware Detect (LMD/MalDet)**. While the original LMD was built specifically for Linux, **LMD-NG** brings that same battle-tested logic to **Windows** and **macOS**, supercharged with the speed, safety, and modern features of **Pure Golang**! 🐹✨
 
-Whether you're protecting a high-traffic server, a personal workstation, or a fleet of cloud instances, LMD-NG is designed to be your lightweight, lightning-fast, and cross-platform guardian. No more heavy shell scripts—just pure, compiled power! 🦾
+Whether you're protecting a high-traffic server, a personal workstation, or a fleet of cloud instances, LMD-NG is designed to be your lightweight, lightning-fast, and cross-platform guardian. No more heavy shell scripts or Linux-only limitations—just pure, compiled power across all major operating systems! 🦾
 
 ---
 
@@ -10,7 +10,7 @@ Whether you're protecting a high-traffic server, a personal workstation, or a fl
 
 *   **⚡ Blazing Performance:** Rewritten in Pure Go for maximum efficiency and minimal resource footprint.
 *   **📦 Zero Dependencies:** Compiled with `CGO_ENABLED=0`. It's a single static binary that just *works*.
-*   **🌍 Truly Cross-Platform:** Not just for Linux! LMD-NG runs beautifully on **macOS** and **Windows** too.
+*   **🌍 Truly Cross-Platform:** Breaking free from the Linux-only roots of the original LMD, LMD-NG runs natively on **Windows**, **macOS**, and **Linux**! 🚀
 *   **🕵️ Real-Time Protection:** Native file system monitoring (using `fsnotify`) catches threats the moment they land.
 *   **🔄 Modern Signature Updates:** Seamlessly pulls the latest threat definitions to keep you safe.
 *   **🦠 Native ClamAV Support:** Built-in loader for ClamAV databases with **zero** `libclamav` dependency. Access a massive signature library natively! 
@@ -42,11 +42,11 @@ Ready to containerize your security? We've got you covered!
 2.  **Fire it up!**
     ```sh
     docker run -d \
+      -v <PATH_TO_CONFIG_YAML_FILE>:/usr/app/lmd-ng/config.yaml \
+      -v <PATH_TO_BE_SCANNED_OR_MONITORED>:/data:rw \
       --name lmd-ng \
-      -v ./config.yaml:/etc/lmd-ng/config.yaml \
-      -v /path/to/scan:/data:ro \
-      dimaskiddo/lmd-ng:latest \
-      lmd-ng daemon
+      --restart unless-stopped \
+      dimaskiddo/lmd-ng:latest
     ```
 
 ### 📦 **Using Pre-Built Binaries**
@@ -58,6 +58,12 @@ Speed is of the essence! Grab a pre-built binary and go.
     ```sh
     # Give it execution power!
     chmod +x lmd-ng
+
+    # Check version
+    ./lmd-ng version
+
+    # Run first database signature update
+    ./lmd-ng update
     
     # Start the daemon
     ./lmd-ng daemon
@@ -91,8 +97,12 @@ LMD-NG comes with a powerful CLI. Here are the most common commands:
 *   **`lmd-ng daemon`**: Start the resident monitor and internal scheduler. 💂‍♂️
 *   **`lmd-ng scan <path>`**: Perform a manual, on-demand scan of a specific directory. 🔍
 *   **`lmd-ng update`**: Manually trigger a signature database update. 🔄
-*   **`lmd-ng service install`**: Automatically register LMD-NG as a background service. ⚙️
+*   **`lmd-ng quarantine list`**: List all files currently in quarantine. 📋
+*   **`lmd-ng quarantine add <file>`**: Manually move a suspicious file to quarantine. 📥
+*   **`lmd-ng quarantine restore <id|path>`**: Restore a file from quarantine to its original location. 📤
+*   **`lmd-ng service install`**: Automatically register LMD-NG as a background service (supports Windows Services, macOS Launchd, and Linux Systemd/Upstart). ⚙️
 *   **`lmd-ng service uninstall`**: Cleanly remove the system service. 🧹
+*   **`lmd-ng version`**: Display the version information. ℹ️
 
 ---
 
