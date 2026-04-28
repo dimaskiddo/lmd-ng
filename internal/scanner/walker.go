@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/user"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
@@ -23,8 +21,6 @@ type Walker struct {
 	parsedMaxFilesize int64
 	includeRegex      *regexp.Regexp
 	excludeRegex      *regexp.Regexp
-
-	// TODO: Implement ignore_user and ignore_group using syscall.Stat_t
 }
 
 // NewWalker creates a new file system walker with the given configuration.
@@ -149,40 +145,9 @@ func (w *Walker) Walk(ctx context.Context, root string, fn func(path string, inf
 			return nil
 		}
 
-		// Apply ignore_root, ignore_user, ignore_group filters
-		if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-			uid := stat.Uid
-			gid := stat.Gid
-
-			// Ignore root if configured (UID 0 is root)
-			if w.cfg.Scanner.IgnoreRoot && uid == 0 {
-				log.Debug("Skipping file owned by root", "path", path)
-				return nil
-			}
-
-			// Ignore specific users
-			if len(w.cfg.Scanner.IgnoreUsers) > 0 {
-				if u, err := user.LookupId(fmt.Sprint(uid)); err == nil {
-					for _, ignoredUser := range w.cfg.Scanner.IgnoreUsers {
-						if u.Username == ignoredUser {
-							log.Debug("Skipping file due to ignore_users", "path", path, "user", ignoredUser)
-							return nil
-						}
-					}
-				}
-			}
-
-			// Ignore specific groups
-			if len(w.cfg.Scanner.IgnoreGroups) > 0 {
-				if g, err := user.LookupGroupId(fmt.Sprint(gid)); err == nil {
-					for _, ignoredGroup := range w.cfg.Scanner.IgnoreGroups {
-						if g.Name == ignoredGroup {
-							log.Debug("Skipping file due to ignore_groups", "path", path, "group", ignoredGroup)
-							return nil
-						}
-					}
-				}
-			}
+		// Apply ignore_root, ignore_user, ignore_group filters (Unix only; no-op on Windows)
+		if applyOwnerFilters(path, info, w.cfg) {
+			return nil
 		}
 
 		// Apply regex filters
@@ -236,37 +201,9 @@ func (w *Walker) scanSingleFile(ctx context.Context, path string, info os.FileIn
 		return nil
 	}
 
-	// Apply ignore_root, ignore_user, ignore_group filters
-	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-		uid := stat.Uid
-		gid := stat.Gid
-
-		if w.cfg.Scanner.IgnoreRoot && uid == 0 {
-			log.Debug("Skipping file owned by root", "path", path)
-			return nil
-		}
-
-		if len(w.cfg.Scanner.IgnoreUsers) > 0 {
-			if u, err := user.LookupId(fmt.Sprint(uid)); err == nil {
-				for _, ignoredUser := range w.cfg.Scanner.IgnoreUsers {
-					if u.Username == ignoredUser {
-						log.Debug("Skipping file due to ignore_users", "path", path, "user", ignoredUser)
-						return nil
-					}
-				}
-			}
-		}
-
-		if len(w.cfg.Scanner.IgnoreGroups) > 0 {
-			if g, err := user.LookupGroupId(fmt.Sprint(gid)); err == nil {
-				for _, ignoredGroup := range w.cfg.Scanner.IgnoreGroups {
-					if g.Name == ignoredGroup {
-						log.Debug("Skipping file due to ignore_groups", "path", path, "group", ignoredGroup)
-						return nil
-					}
-				}
-			}
-		}
+	// Apply ignore_root, ignore_user, ignore_group filters (Unix only; no-op on Windows)
+	if applyOwnerFilters(path, info, w.cfg) {
+		return nil
 	}
 
 	// Apply regex filters

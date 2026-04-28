@@ -2,7 +2,7 @@ before:
   hooks:
     - make vendor
 builds:
-  - main: .
+  - main: ./cmd/lmd-ng
     env:
       - CGO_ENABLED=0
     ldflags:
