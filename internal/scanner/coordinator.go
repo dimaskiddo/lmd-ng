@@ -172,16 +172,18 @@ func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string) ([]*S
 // if malware is detected. This is intended for real-time monitor use where
 // detected threats must be handled immediately rather than collected into a
 // batch result set.
-func (sc *ScanCoordinator) ScanFileAndAct(ctx context.Context, filePath string) {
+func (sc *ScanCoordinator) ScanFileAndAct(ctx context.Context, filePath string) ([]*ScanResult, bool) {
 	fileResults, err := sc.ScanFile(ctx, filePath)
 	if err != nil {
 		log.Error("Failed to scan file", "filepath", filePath, "error", err)
-		return
+		return nil, false
 	}
 
 	if len(fileResults) == 0 {
-		return
+		return nil, false
 	}
+
+	quarantined := false
 
 	// If quarantine is enabled, quarantine the file immediately
 	if sc.cfg.Quarantine.Enabled {
@@ -190,8 +192,12 @@ func (sc *ScanCoordinator) ScanFileAndAct(ctx context.Context, filePath string) 
 		_, qErr := sc.quarantineMgr.Quarantine(ctx, filePath, fileResults[0].SignatureName, fileResults[0].SignatureType)
 		if qErr != nil {
 			log.Error("Failed to quarantine file", "file", filePath, "error", qErr)
+		} else {
+			quarantined = true
 		}
 	}
+
+	return fileResults, quarantined
 }
 
 // ScanFile opens a file and passes its content to all registered signature engines.

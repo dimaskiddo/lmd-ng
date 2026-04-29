@@ -7,13 +7,14 @@ import (
 )
 
 type Config struct {
-	App        AppConfig        `yaml:"app" mapstructure:"app"`
-	Logging    LoggingConfig    `yaml:"logging" mapstructure:"logging"`
-	Monitor    MonitorConfig    `yaml:"monitor" mapstructure:"monitor"`
-	Quarantine QuarantineConfig `yaml:"quarantine" mapstructure:"quarantine"`
-	Scanner    ScannerConfig    `yaml:"scanner" mapstructure:"scanner"`
-	Scheduler  SchedulerConfig  `yaml:"scheduler" mapstructure:"scheduler"`
-	Updater    UpdaterConfig    `yaml:"updater" mapstructure:"updater"`
+	App          AppConfig          `yaml:"app" mapstructure:"app"`
+	Logging      LoggingConfig      `yaml:"logging" mapstructure:"logging"`
+	Monitor      MonitorConfig      `yaml:"monitor" mapstructure:"monitor"`
+	Quarantine   QuarantineConfig   `yaml:"quarantine" mapstructure:"quarantine"`
+	Scanner      ScannerConfig      `yaml:"scanner" mapstructure:"scanner"`
+	Scheduler    SchedulerConfig    `yaml:"scheduler" mapstructure:"scheduler"`
+	Updater      UpdaterConfig      `yaml:"updater" mapstructure:"updater"`
+	Notification NotificationConfig `yaml:"notification" mapstructure:"notification"`
 }
 
 // AppConfig holds application-wide settings.
@@ -91,6 +92,18 @@ type UpdaterConfig struct {
 	ClamAVDatabases      []string `yaml:"clamav_databases" mapstructure:"clamav_databases"`
 }
 
+// NotificationConfig holds email notification settings.
+type NotificationConfig struct {
+	Enabled       bool     `yaml:"enabled" mapstructure:"enabled"`
+	SMTPHost      string   `yaml:"smtp_host" mapstructure:"smtp_host"`
+	SMTPPort      int      `yaml:"smtp_port" mapstructure:"smtp_port"`
+	SMTPUsername  string   `yaml:"smtp_username" mapstructure:"smtp_username"`
+	SMTPPassword  string   `yaml:"smtp_password" mapstructure:"smtp_password"`
+	SMTPUseSSLTLS bool     `yaml:"smtp_use_ssl_tls" mapstructure:"smtp_use_ssl_tls"`
+	Sender        string   `yaml:"sender" mapstructure:"sender"`
+	Recipients    []string `yaml:"recipients" mapstructure:"recipients"`
+}
+
 // SetDefaultConfig sets default values for the configuration.
 // NOTE: BasePath is intentionally left as "." here as a compile-time
 // placeholder. NewConfigManager always overrides BasePath with the directory
@@ -152,6 +165,15 @@ func SetDefaultConfig(config *Config) {
 	config.Updater.ClamAVUpdateEnabled = false
 	config.Updater.ClamAVMirrorURL = "https://database.clamav.net"
 	config.Updater.ClamAVDatabases = []string{"daily.cvd", "bytecode.cvd", "main.cvd"}
+
+	config.Notification.Enabled = false
+	config.Notification.SMTPHost = "smtp.example.com"
+	config.Notification.SMTPPort = 587
+	config.Notification.SMTPUsername = "user@example.com"
+	config.Notification.SMTPPassword = "secretpassword"
+	config.Notification.SMTPUseSSLTLS = false
+	config.Notification.Sender = "lmd-ng@example.com"
+	config.Notification.Recipients = []string{"admin@example.com"}
 }
 
 // ResolvePaths ensures all directory and file paths in the configuration

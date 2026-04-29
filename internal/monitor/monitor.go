@@ -11,6 +11,7 @@ import (
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
+	"github.com/dimaskiddo/lmd-ng/internal/notifier"
 	"github.com/dimaskiddo/lmd-ng/internal/scanner"
 )
 
@@ -19,12 +20,13 @@ type Monitor struct {
 	cfg         *config.Config
 	watcher     *fsnotify.Watcher
 	coordinator *scanner.ScanCoordinator
+	notifier    *notifier.EmailNotifier
 	events      chan fsnotify.Event
 	errors      chan error
 }
 
 // NewMonitor creates and initializes a new file system monitor.
-func NewMonitor(cfg *config.Config, coordinator *scanner.ScanCoordinator) (*Monitor, error) {
+func NewMonitor(cfg *config.Config, coordinator *scanner.ScanCoordinator, emailNotifier *notifier.EmailNotifier) (*Monitor, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create fsnotify watcher: %w", err)
@@ -34,6 +36,7 @@ func NewMonitor(cfg *config.Config, coordinator *scanner.ScanCoordinator) (*Moni
 		cfg:         cfg,
 		watcher:     watcher,
 		coordinator: coordinator,
+		notifier:    emailNotifier,
 		events:      make(chan fsnotify.Event),
 		errors:      make(chan error),
 	}
@@ -129,7 +132,16 @@ func (m *Monitor) Start(ctx context.Context) error {
 				event.Op&fsnotify.Rename == fsnotify.Rename {
 				// Trigger a scan for the affected file
 				log.Info("File system event detected, triggering scan", "file", event.Name, "op", event.Op.String())
-				go m.coordinator.ScanFileAndAct(ctx, event.Name) // Run scan + quarantine in a goroutine
+				go func(filePath string) {
+					results, quarantined := m.coordinator.ScanFileAndAct(ctx, filePath)
+					if quarantined && len(results) > 0 {
+						if m.notifier != nil {
+							if err := m.notifier.SendQuarantineNotification(filePath, results[0].SignatureName); err != nil {
+								log.Error("Failed to send quarantine notification email", "error", err)
+							}
+						}
+					}
+				}(event.Name) // Run scan + quarantine in a goroutine
 			}
 
 			// If a directory is created, add it to the watcher recursively

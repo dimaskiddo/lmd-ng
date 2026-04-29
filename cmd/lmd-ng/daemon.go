@@ -11,6 +11,7 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
 	"github.com/dimaskiddo/lmd-ng/internal/monitor"
+	"github.com/dimaskiddo/lmd-ng/internal/notifier"
 	"github.com/dimaskiddo/lmd-ng/internal/scanner"
 	"github.com/dimaskiddo/lmd-ng/internal/scheduler"
 	"github.com/dimaskiddo/lmd-ng/internal/updater"
@@ -66,7 +67,9 @@ func daemonCmd() *cobra.Command {
 			// when signatures are updated on disk.
 			coordinator.EngineFactory = buildEngines
 
-			mon, err := monitor.NewMonitor(cfg, coordinator)
+			emailNotifier := notifier.NewEmailNotifier(&cfg.Notification)
+
+			mon, err := monitor.NewMonitor(cfg, coordinator, emailNotifier)
 			if err != nil {
 				log.Error("Failed to create monitor", "error", err)
 				os.Exit(1)
