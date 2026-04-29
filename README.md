@@ -2,7 +2,7 @@
 
 Welcome to the future of multi-platform security! **LMD-NG** is a complete, ground-up rewrite of the legendary **Linux Malware Detect (LMD/MalDet)**. While the original LMD was built specifically for Linux, **LMD-NG** brings that same battle-tested logic to **Windows** and **macOS**, supercharged with the speed, safety, and modern features of **Pure Golang**! 🐹✨
 
-Whether you're protecting a high-traffic server, a personal workstation, or a fleet of cloud instances, LMD-NG is designed to be your lightweight, lightning-fast, and cross-platform guardian. No more heavy shell scripts or Linux-only limitations—just pure, compiled power across all major operating systems! 🦾
+Whether you're protecting a high-traffic server, a personal workstation, or a fleet of cloud instances, LMD-NG is designed to be your lightweight, lightning-fast, and cross-platform guardian. With **real-time email alerts** and **automated quarantine**, you can rest easy knowing your systems are protected across all major operating systems! 🦾
 
 ---
 
@@ -16,6 +16,7 @@ Whether you're protecting a high-traffic server, a personal workstation, or a fl
 *   **🦠 Native ClamAV Support:** Built-in loader for ClamAV databases with **zero** `libclamav` dependency. Access a massive signature library natively! 
 *   **🛠️ Service Integration:** Easily install/uninstall as a system service with a single command.
 *   **🔒 Secure Quarantine:** Safely isolates threats with optional AES encryption to prevent accidental execution.
+*   **📧 Email Notifications:** Get instant HTML-formatted alerts when malware is detected. Supports SMTP with SSL/TLS.
 *   **📊 Structured Logging:** Clean, modern logs using Go's `slog` for better observability.
 
 ---
