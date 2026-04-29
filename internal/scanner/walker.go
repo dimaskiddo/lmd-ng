@@ -118,8 +118,10 @@ func (w *Walker) Walk(ctx context.Context, root string, fn func(path string, inf
 			}
 
 			// Check if directory is in exclude_dirs
+			cleanPath := filepath.Clean(path)
 			for _, excludeDir := range w.cfg.Monitor.ExcludeDirs {
-				if path == excludeDir || strings.HasPrefix(path, excludeDir+string(filepath.Separator)) {
+				cleanExcludeDir := filepath.Clean(excludeDir)
+				if cleanPath == cleanExcludeDir || strings.HasPrefix(cleanPath, cleanExcludeDir+string(filepath.Separator)) {
 					log.Debug("Skipping directory due to exclude_dirs", "path", path, "exclude_dir", excludeDir)
 					return filepath.SkipDir
 				}

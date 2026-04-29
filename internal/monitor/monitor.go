@@ -63,10 +63,15 @@ func (m *Monitor) AddRecursive(path string) error {
 		}
 
 		// Check for excluded directories
+		cleanP := filepath.Clean(p)
 		for _, excluded := range m.cfg.Monitor.ExcludeDirs {
-			if p == excluded {
-				log.Debug("Excluding directory from monitoring", "path", p)
-				return filepath.SkipDir
+			cleanExcluded := filepath.Clean(excluded)
+			if cleanP == cleanExcluded || strings.HasPrefix(cleanP, cleanExcluded+string(filepath.Separator)) {
+				log.Debug("Excluding path from monitoring", "path", p)
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 		}
 
@@ -103,11 +108,19 @@ func (m *Monitor) Start(ctx context.Context) error {
 			log.Debug("FSNotify event received", "event", event.String())
 
 			// Filter out events from excluded directories
+			isExcluded := false
+			cleanEventName := filepath.Clean(event.Name)
 			for _, excluded := range m.cfg.Monitor.ExcludeDirs {
-				if strings.HasPrefix(event.Name, excluded) {
+				cleanExcluded := filepath.Clean(excluded)
+				if cleanEventName == cleanExcluded || strings.HasPrefix(cleanEventName, cleanExcluded+string(filepath.Separator)) {
 					log.Debug("Ignoring event in excluded directory", "path", event.Name)
-					continue
+					isExcluded = true
+					break
 				}
+			}
+
+			if isExcluded {
+				continue
 			}
 
 			// Only act on relevant file operations for now

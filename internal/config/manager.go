@@ -112,6 +112,35 @@ func NewConfigManager(configFilePath string) (*Manager, error) {
 		m.Config.App.BasePath = filepath.Join(binDir, m.Config.App.BasePath)
 	}
 
+	// Add app data directories to exclude list to prevent recursive monitoring loops
+	// and to ensure the on-demand scanner doesn't scan its own data.
+	appDirs := []string{
+		m.Config.App.SignaturesDir,
+		m.Config.App.ClamAVDir,
+		m.Config.App.QuarantineDir,
+		filepath.Dir(m.Config.Logging.FilePath), // Get directory of log file
+	}
+
+	for _, dir := range appDirs {
+		if dir != "" {
+			absDir, err := filepath.Abs(dir)
+			if err == nil {
+				// Avoid duplicates
+				exists := false
+				for _, e := range m.Config.Monitor.ExcludeDirs {
+					if e == absDir {
+						exists = true
+						break
+					}
+				}
+
+				if !exists {
+					m.Config.Monitor.ExcludeDirs = append(m.Config.Monitor.ExcludeDirs, absDir)
+				}
+			}
+		}
+	}
+
 	return m, nil
 }
 
@@ -135,6 +164,34 @@ func (m *Manager) WatchConfig(ctx context.Context) {
 		// anchoring relative paths to the binary directory rather than CWD.
 		if !filepath.IsAbs(m.Config.App.BasePath) {
 			m.Config.App.BasePath = filepath.Join(executableDir(), m.Config.App.BasePath)
+		}
+
+		// Add app data directories to exclude list to prevent recursive monitoring loops
+		appDirs := []string{
+			m.Config.App.SignaturesDir,
+			m.Config.App.ClamAVDir,
+			m.Config.App.QuarantineDir,
+			filepath.Dir(m.Config.Logging.FilePath),
+		}
+
+		for _, dir := range appDirs {
+			if dir != "" {
+				absDir, err := filepath.Abs(dir)
+				if err == nil {
+					// Avoid duplicates
+					exists := false
+					for _, e := range m.Config.Monitor.ExcludeDirs {
+						if e == absDir {
+							exists = true
+							break
+						}
+					}
+
+					if !exists {
+						m.Config.Monitor.ExcludeDirs = append(m.Config.Monitor.ExcludeDirs, absDir)
+					}
+				}
+			}
 		}
 
 		// Notify listeners about config change
