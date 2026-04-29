@@ -112,6 +112,10 @@ func NewConfigManager(configFilePath string) (*Manager, error) {
 		m.Config.App.BasePath = filepath.Join(binDir, m.Config.App.BasePath)
 	}
 
+	// Ensure all paths in the configuration are absolute, resolving any
+	// relative paths against the potentially updated BasePath.
+	m.Config.ResolvePaths()
+
 	// Add app data directories to exclude list to prevent recursive monitoring loops
 	// and to ensure the on-demand scanner doesn't scan its own data.
 	appDirs := []string{
@@ -165,6 +169,9 @@ func (m *Manager) WatchConfig(ctx context.Context) {
 		if !filepath.IsAbs(m.Config.App.BasePath) {
 			m.Config.App.BasePath = filepath.Join(executableDir(), m.Config.App.BasePath)
 		}
+
+		// Ensure all paths in the configuration are absolute
+		m.Config.ResolvePaths()
 
 		// Add app data directories to exclude list to prevent recursive monitoring loops
 		appDirs := []string{

@@ -154,6 +154,28 @@ func SetDefaultConfig(config *Config) {
 	config.Updater.ClamAVDatabases = []string{"daily.cvd", "bytecode.cvd", "main.cvd"}
 }
 
+// ResolvePaths ensures all directory and file paths in the configuration
+// are absolute. Any relative paths are resolved against the App.BasePath.
+func (c *Config) ResolvePaths() {
+	resolve := func(path *string) {
+		if *path != "" && !filepath.IsAbs(*path) {
+			*path = filepath.Join(c.App.BasePath, *path)
+		}
+	}
+
+	resolve(&c.App.SignaturesDir)
+	resolve(&c.App.ClamAVDir)
+	resolve(&c.App.QuarantineDir)
+	resolve(&c.App.LogsDir)
+
+	resolve(&c.Logging.FilePath)
+
+	resolve(&c.Quarantine.Path)
+
+	resolve(&c.Scanner.SignaturePath)
+	resolve(&c.Scanner.ClamAVDBPath)
+}
+
 // EnsureDirectories creates all required application directories based on
 // the current configuration. This should be called once during startup to
 // guarantee the directory tree exists regardless of how the binary was
@@ -184,11 +206,6 @@ func EnsureDirectories(cfg *Config) error {
 			dirPath = filepath.Dir(dirPath)
 		}
 
-		// Resolve relative paths against BasePath
-		if !filepath.IsAbs(dirPath) {
-			dirPath = filepath.Join(cfg.App.BasePath, dirPath)
-		}
-
 		if err := os.MkdirAll(dirPath, 0755); err != nil {
 			return fmt.Errorf("failed to create %s directory %s: %w", d.name, dirPath, err)
 		}
@@ -202,9 +219,6 @@ func EnsureDirectories(cfg *Config) error {
 // the configured signatures path, indicating a previous successful update.
 func HasSignatures(cfg *Config) bool {
 	sigPath := cfg.Scanner.SignaturePath
-	if !filepath.IsAbs(sigPath) {
-		sigPath = filepath.Join(cfg.App.BasePath, sigPath)
-	}
 
 	// Check for the dat/ subdirectory which contains core LMD signatures
 	datDir := filepath.Join(sigPath, "dat")

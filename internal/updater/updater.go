@@ -114,9 +114,6 @@ func (u *Updater) updateLMDSignatures(ctx context.Context) (bool, error) {
 
 	// Extract package into the signatures directory
 	sigDirPath := u.cfg.App.SignaturesDir
-	if !filepath.IsAbs(sigDirPath) {
-		sigDirPath = filepath.Join(u.cfg.App.BasePath, sigDirPath)
-	}
 
 	if err := os.MkdirAll(sigDirPath, 0755); err != nil {
 		return false, fmt.Errorf("failed to create signatures directory %s: %w", sigDirPath, err)
@@ -145,10 +142,6 @@ func (u *Updater) updateClamAV(ctx context.Context) (bool, error) {
 
 	if clamDBPath == "" {
 		clamDBPath = u.cfg.App.ClamAVDir
-	}
-
-	if !filepath.IsAbs(clamDBPath) {
-		clamDBPath = filepath.Join(u.cfg.App.BasePath, clamDBPath)
 	}
 
 	if err := os.MkdirAll(clamDBPath, 0755); err != nil {
@@ -280,9 +273,6 @@ func (u *Updater) downloadClamAVDatabase(ctx context.Context, url, localPath str
 // getCurrentLMDVersion reads the local LMD signature version file.
 func (u *Updater) getCurrentLMDVersion() (string, error) {
 	sigDirPath := u.cfg.App.SignaturesDir
-	if !filepath.IsAbs(sigDirPath) {
-		sigDirPath = filepath.Join(u.cfg.App.BasePath, sigDirPath)
-	}
 
 	versionFilePath := filepath.Join(sigDirPath, filepath.Base(u.cfg.Updater.SignatureVersionURL))
 

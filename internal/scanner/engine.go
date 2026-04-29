@@ -273,10 +273,6 @@ func NewClamAVSignatureEngine(cfg *config.Config) (*ClamAVSignatureEngine, error
 		clamDBPath = cfg.App.ClamAVDir
 	}
 
-	if !filepath.IsAbs(clamDBPath) {
-		clamDBPath = filepath.Join(cfg.App.BasePath, clamDBPath)
-	}
-
 	log.Info("Initializing ClamAV signature engine", "db_path", clamDBPath)
 
 	db, err := clamav.LoadFromDirectory(clamDBPath)
