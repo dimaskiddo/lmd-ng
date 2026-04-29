@@ -14,13 +14,15 @@ import (
 
 // sha256Scanner is responsible for loading and checking SHA256 signatures.
 type sha256Scanner struct {
-	signatures map[string]string // sha256 hash (lowercase) -> signature name
+	signatures     map[string]string // sha256 hash (lowercase) -> signature name
+	allowlistPaths []string          // path prefixes whose files are exempt from hash matching
 }
 
 // NewSHA256Scanner creates and initializes a new SHA256 scanner.
 func NewSHA256Scanner(cfg *config.Config) (*sha256Scanner, error) {
 	s := &sha256Scanner{
-		signatures: make(map[string]string),
+		signatures:     make(map[string]string),
+		allowlistPaths: cfg.Scanner.HashAllowlistPaths,
 	}
 
 	datDir := filepath.Join(cfg.App.SignaturesDir, "dat")
@@ -115,6 +117,27 @@ func (s *sha256Scanner) loadSignatures(filePath string) error {
 }
 
 // Check returns the signature name if the SHA256 hash matches a known signature.
-func (s *sha256Scanner) Check(sha256Hash string) string {
-	return s.signatures[strings.ToLower(sha256Hash)]
+//
+// System-path allowlist guard: if filePath starts with any configured
+// allowlist prefix, the detection is suppressed and an empty string is
+// returned. This prevents a bad signature database from falsely flagging
+// legitimate system files (e.g. /usr/bin/sudo, /usr/lib/*.so).
+func (s *sha256Scanner) Check(sha256Hash, filePath string) string {
+	name := s.signatures[strings.ToLower(sha256Hash)]
+	if name == "" {
+		return ""
+	}
+
+	// Check if the file path is under any allowlisted prefix
+	for _, prefix := range s.allowlistPaths {
+		if strings.HasPrefix(filePath, prefix) {
+			log.Warn("SHA256 hash match suppressed by system-path allowlist",
+				"file", filePath,
+				"signature", name,
+				"allowlist_prefix", prefix)
+			return ""
+		}
+	}
+
+	return name
 }

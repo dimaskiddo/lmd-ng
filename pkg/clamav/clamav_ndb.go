@@ -12,6 +12,82 @@ import (
 	"strings"
 )
 
+// NDB TargetType constants as defined by the ClamAV signature specification.
+// See: https://docs.clamav.net/manual/Signatures/ExtendedSignatures.html
+const (
+	// NDBTargetAny matches any file type.
+	NDBTargetAny = 0
+	// NDBTargetPE matches Windows PE executables (MZ/PE magic).
+	NDBTargetPE = 1
+	// NDBTargetOLE2 matches Microsoft OLE2 compound documents (Office files, etc.).
+	NDBTargetOLE2 = 2
+	// NDBTargetHTML matches HTML files.
+	NDBTargetHTML = 3
+	// NDBTargetMail matches e-mail files.
+	NDBTargetMail = 4
+	// NDBTargetGraphics matches graphics files.
+	NDBTargetGraphics = 5
+	// NDBTargetELF matches ELF executables and shared libraries (Linux/Unix).
+	NDBTargetELF = 6
+	// NDBTargetASCII matches ASCII/plain-text files.
+	NDBTargetASCII = 7
+	// NDBTargetMachO matches Mach-O executables (macOS/iOS).
+	NDBTargetMachO = 9
+)
+
+// Magic byte sequences used to detect file type for NDB TargetType filtering.
+var (
+	// magicMZ is the DOS/PE executable header ("MZ").
+	magicMZ = []byte{0x4D, 0x5A}
+	// magicELF is the ELF executable/library header ("\x7fELF").
+	magicELF = []byte{0x7F, 0x45, 0x4C, 0x46}
+	// magicOLE2 is the OLE2 compound document header.
+	magicOLE2 = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
+	// magicMachO32 is the Mach-O 32-bit little-endian magic.
+	magicMachO32 = []byte{0xCE, 0xFA, 0xED, 0xFE}
+	// magicMachO64 is the Mach-O 64-bit little-endian magic.
+	magicMachO64 = []byte{0xCF, 0xFA, 0xED, 0xFE}
+	// magicMachO32BE is the Mach-O 32-bit big-endian magic.
+	magicMachO32BE = []byte{0xFE, 0xED, 0xFA, 0xCE}
+	// magicMachO64BE is the Mach-O 64-bit big-endian magic.
+	magicMachO64BE = []byte{0xFE, 0xED, 0xFA, 0xCF}
+)
+
+// detectFileType inspects the first bytes of content to determine the ClamAV
+// NDB TargetType. Returns NDBTargetAny (0) when the type cannot be determined.
+func detectFileType(content []byte) int {
+	if len(content) < 2 {
+		return NDBTargetAny
+	}
+
+	// ELF: \x7fELF — must be checked before PE because some linkers embed MZ stubs.
+	if len(content) >= 4 && bytes.HasPrefix(content, magicELF) {
+		return NDBTargetELF
+	}
+
+	// Windows PE / DOS executable: MZ header.
+	if bytes.HasPrefix(content, magicMZ) {
+		return NDBTargetPE
+	}
+
+	// OLE2 compound document.
+	if len(content) >= 8 && bytes.HasPrefix(content, magicOLE2) {
+		return NDBTargetOLE2
+	}
+
+	// Mach-O (any endianness / bitness).
+	if len(content) >= 4 {
+		prefix4 := content[:4]
+		if bytes.Equal(prefix4, magicMachO32) || bytes.Equal(prefix4, magicMachO64) ||
+			bytes.Equal(prefix4, magicMachO32BE) || bytes.Equal(prefix4, magicMachO64BE) {
+			return NDBTargetMachO
+		}
+	}
+
+	// Fallback: treat as generic / any.
+	return NDBTargetAny
+}
+
 // NDBSignature represents a single ClamAV NDB (body/extended) signature.
 type NDBSignature struct {
 	Name       string         // Malware name
@@ -108,10 +184,31 @@ func (s *NDBStore) LoadNDB(r io.Reader, sourceName string) error {
 
 // Match checks the given content against all loaded NDB signatures and returns
 // the names of any matching signatures. The fileSize is used for EOF-based offsets.
+//
+// TargetType enforcement: each signature carries a ClamAV target type (e.g. 1=PE,
+// 6=ELF). This method detects the actual file type from content magic bytes and
+// skips any signature whose TargetType does not match, preventing Windows-targeted
+// signatures (Win.Trojan.*) from firing on Linux ELF binaries.
 func (s *NDBStore) Match(content []byte, fileSize int64) []string {
 	var matches []string
 
+	// Detect the file type once for the entire content buffer so that every
+	// signature can be filtered without re-reading magic bytes in the loop.
+	detectedType := detectFileType(content)
+
 	for _, sig := range s.Signatures {
+		// --- TargetType filter ---
+		// A signature with TargetType == NDBTargetAny (0) matches all files.
+		// Any other value restricts the signature to a specific file format.
+		// If the detected file type is NDBTargetAny (unknown/generic), we still
+		// apply all signatures to avoid missing detections on unrecognised formats.
+		if sig.TargetType != NDBTargetAny && detectedType != NDBTargetAny {
+			if sig.TargetType != detectedType {
+				// Signature is for a different file type — skip to avoid false positives.
+				continue
+			}
+		}
+
 		// Determine the slice of content to search based on offset
 		searchContent := resolveOffsetContent(content, sig.Offset, fileSize)
 		if searchContent == nil {

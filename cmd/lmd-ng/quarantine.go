@@ -58,15 +58,34 @@ func quarantineListCmd() *cobra.Command {
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			defer w.Flush()
 
-			fmt.Fprintln(w, "SHORT ID\tORIGINAL PATH\tDETECTION\tENCRYPTED")
-			fmt.Fprintln(w, "--------\t-------------\t---------\t---------")
+			fmt.Fprintln(w, "SHORT ID\tORIGINAL PATH\tDETECTION\tENGINE\tMODE\tOWNER\tQUARANTINED AT\tENCRYPTED")
+			fmt.Fprintln(w, "--------\t-------------\t---------\t------\t----\t-----\t--------------\t---------")
 
 			for _, e := range entries {
 				encrypted := "no"
 				if e.Encrypted {
 					encrypted = "yes"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.ShortID, e.OriginalPath, e.DetectionInfo, encrypted)
+
+				owner := fmt.Sprintf("%s:%s", e.Username, e.GroupName)
+
+				quarantinedAt := "-"
+				if !e.QuarantinedAt.IsZero() {
+					quarantinedAt = e.QuarantinedAt.Format("2006-01-02 15:04:05")
+				}
+
+				mode := e.FileMode
+				if mode == "" {
+					mode = "-"
+				}
+
+				engine := e.DetectionEngine
+				if engine == "" {
+					engine = "manual"
+				}
+
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					e.ShortID, e.OriginalPath, e.DetectionInfo, engine, mode, owner, quarantinedAt, encrypted)
 			}
 		},
 	}
@@ -105,7 +124,7 @@ func quarantineAddCmd() *cobra.Command {
 			cfg := cfgMgr.GetConfig()
 			qm := quarantine.NewQuarantineManager(&cfg.Quarantine)
 
-			quarantinePath, err := qm.Quarantine(ctx, filePath, manualQuarantineInfo)
+			quarantinePath, err := qm.Quarantine(ctx, filePath, manualQuarantineInfo, "")
 			if err != nil {
 				log.Error("Failed to quarantine file", "path", filePath, "error", err)
 				os.Exit(1)

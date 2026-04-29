@@ -66,6 +66,12 @@ type ScannerConfig struct {
 	IgnoreGroups   []string `yaml:"ignore_groups" mapstructure:"ignore_groups"`
 	IncludeRegex   string   `yaml:"include_regex" mapstructure:"include_regex"`
 	ExcludeRegex   string   `yaml:"exclude_regex" mapstructure:"exclude_regex"`
+	// HashAllowlistPaths is an optional list of path prefixes under which
+	// MD5 and SHA256 hash-engine detections are suppressed. This guards
+	// against a bad signature database containing hashes of legitimate
+	// system files. Leave empty (default) to disable the allowlist and
+	// report all hash matches regardless of file location.
+	HashAllowlistPaths []string `yaml:"hash_allowlist_paths" mapstructure:"hash_allowlist_paths"`
 }
 
 // SchedulerConfig holds scheduling settings for updates and scans.
@@ -132,6 +138,7 @@ func SetDefaultConfig(config *Config) {
 
 	config.Scanner.IncludeRegex = ""
 	config.Scanner.ExcludeRegex = ""
+	config.Scanner.HashAllowlistPaths = []string{}
 
 	config.Scheduler.UpdateInterval = "@daily"
 	config.Scheduler.ScanInterval = "@every 4h"

@@ -122,7 +122,7 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.Reader, filePath st
 	md5Hash := hex.EncodeToString(md5Hasher.Sum(nil))
 	sha256Hash := hex.EncodeToString(sha256Hasher.Sum(nil))
 
-	if sigName := s.md5Scanner.Check(md5Hash); sigName != "" {
+	if sigName := s.md5Scanner.Check(md5Hash, filePath); sigName != "" {
 		return []*ScanResult{{
 			SignatureName: sigName,
 			SignatureType: "MD5",
@@ -131,7 +131,7 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.Reader, filePath st
 		}}, nil
 	}
 
-	if sigName := s.sha256Scanner.Check(sha256Hash); sigName != "" {
+	if sigName := s.sha256Scanner.Check(sha256Hash, filePath); sigName != "" {
 		return []*ScanResult{{
 			SignatureName: sigName,
 			SignatureType: "SHA256",
@@ -238,7 +238,7 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.Reader, filePath st
 		return nil, fmt.Errorf("failed to read content for HEX scan: %w", err)
 	}
 
-	hexMatches := s.hexScanner.Check(hexContent)
+	hexMatches := s.hexScanner.Check(hexContent, filePath)
 	if len(hexMatches) > 0 {
 		// Return only the first HEX match
 		return []*ScanResult{{

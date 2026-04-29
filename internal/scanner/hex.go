@@ -108,9 +108,27 @@ func (s *hexScanner) loadSignatures(filePath string) error {
 }
 
 // Check searches the given content for any loaded hex signatures and returns their names.
-func (s *hexScanner) Check(content []byte) []string {
+//
+// False-positive guard: if the file's content begins with a native-executable
+// magic header (ELF or Mach-O), any signature whose name starts with a
+// Windows-targeted threat family prefix (e.g. "Win.", "Backdoor.Win") is
+// skipped. This prevents Windows-specific hex patterns from matching against
+// Linux shared libraries or macOS dylibs.
+func (s *hexScanner) Check(content []byte, filePath string) []string {
+	detectedType := detectMagicType(content)
+	nativeExec := isNativeExecutable(detectedType)
+
 	var matchedSigs []string
 	for _, sig := range s.signatures {
+		// Skip Windows-targeted signatures when scanning native executables.
+		if nativeExec && isWindowsTargetedSig(sig.name) {
+			log.Debug("Skipping Windows-targeted HEX signature on native executable",
+				"signature", sig.name,
+				"file", filePath,
+				"detected_type", detectedType)
+			continue
+		}
+
 		if bytes.Contains(content, sig.pattern) {
 			matchedSigs = append(matchedSigs, sig.name)
 		}

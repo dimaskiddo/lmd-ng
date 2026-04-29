@@ -123,7 +123,7 @@ func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string) ([]*S
 				if sc.cfg.Quarantine.Enabled {
 					log.Info("Threat detected, quarantining file", "file", filePath, "detections", len(fileResults))
 
-					_, qErr := sc.quarantineMgr.Quarantine(childCtx, filePath, fileResults[0].SignatureName)
+					_, qErr := sc.quarantineMgr.Quarantine(childCtx, filePath, fileResults[0].SignatureName, fileResults[0].SignatureType)
 					if qErr != nil {
 						log.Error("Failed to quarantine file", "file", filePath, "error", qErr)
 					}
@@ -187,7 +187,7 @@ func (sc *ScanCoordinator) ScanFileAndAct(ctx context.Context, filePath string) 
 	if sc.cfg.Quarantine.Enabled {
 		log.Info("Threat detected, quarantining file", "file", filePath, "detections", len(fileResults))
 
-		_, qErr := sc.quarantineMgr.Quarantine(ctx, filePath, fileResults[0].SignatureName)
+		_, qErr := sc.quarantineMgr.Quarantine(ctx, filePath, fileResults[0].SignatureName, fileResults[0].SignatureType)
 		if qErr != nil {
 			log.Error("Failed to quarantine file", "file", filePath, "error", qErr)
 		}
@@ -203,6 +203,7 @@ func (sc *ScanCoordinator) ScanFile(ctx context.Context, filePath string) ([]*Sc
 			log.Debug("File no longer exists, skipping scan", "filepath", filePath)
 			return nil, nil
 		}
+
 		if os.IsPermission(err) {
 			log.Warn("Permission denied to stat file", "filepath", filePath, "error", err)
 			return nil, nil

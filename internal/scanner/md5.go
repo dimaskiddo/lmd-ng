@@ -14,13 +14,15 @@ import (
 
 // md5Scanner is responsible for loading and checking MD5 signatures.
 type md5Scanner struct {
-	signatures map[string]string // md5 hash (lowercase) -> signature name
+	signatures     map[string]string // md5 hash (lowercase) -> signature name
+	allowlistPaths []string          // path prefixes whose files are exempt from hash matching
 }
 
 // NewMD5Scanner creates and initializes a new MD5 scanner.
 func NewMD5Scanner(cfg *config.Config) (*md5Scanner, error) {
 	s := &md5Scanner{
-		signatures: make(map[string]string),
+		signatures:     make(map[string]string),
+		allowlistPaths: cfg.Scanner.HashAllowlistPaths,
 	}
 
 	datDir := filepath.Join(cfg.App.SignaturesDir, "dat")
@@ -115,6 +117,27 @@ func (s *md5Scanner) loadSignatures(filePath string) error {
 }
 
 // Check returns the signature name if the MD5 hash matches a known signature.
-func (s *md5Scanner) Check(md5Hash string) string {
-	return s.signatures[strings.ToLower(md5Hash)]
+//
+// System-path allowlist guard: if filePath starts with any configured
+// allowlist prefix, the detection is suppressed and an empty string is
+// returned. This prevents a bad signature database from falsely flagging
+// legitimate system files (e.g. /usr/bin/sudo, /usr/lib/*.so).
+func (s *md5Scanner) Check(md5Hash, filePath string) string {
+	name := s.signatures[strings.ToLower(md5Hash)]
+	if name == "" {
+		return ""
+	}
+
+	// Check if the file path is under any allowlisted prefix
+	for _, prefix := range s.allowlistPaths {
+		if strings.HasPrefix(filePath, prefix) {
+			log.Warn("MD5 hash match suppressed by system-path allowlist",
+				"file", filePath,
+				"signature", name,
+				"allowlist_prefix", prefix)
+			return ""
+		}
+	}
+
+	return name
 }
