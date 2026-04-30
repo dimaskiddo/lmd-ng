@@ -137,9 +137,12 @@ func (m *Monitor) Start(ctx context.Context) error {
 					results, quarantined := m.coordinator.ScanFileAndAct(ctx, filePath)
 					if quarantined && len(results) > 0 {
 						if m.notifier != nil {
-							if err := m.notifier.SendQuarantineNotification(filePath, results[0].SignatureName); err != nil {
-								log.Error("Failed to send quarantine notification", "error", err)
-							}
+							// Fire and forget: send notification asynchronously
+							go func() {
+								if err := m.notifier.SendQuarantineNotification(filePath, results[0].SignatureName); err != nil {
+									log.Error("Failed to send quarantine notification", "error", err)
+								}
+							}()
 						}
 					}
 				}(event.Name) // Run scan + quarantine in a goroutine

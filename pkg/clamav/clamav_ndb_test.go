@@ -60,6 +60,6 @@ func TestNDBMatchTargetTypeFiltering(t *testing.T) {
 	unknownContent := append([]byte{0x89, 0x50, 0x4E, 0x47}, []byte{0xDE, 0xAD, 0xBE, 0xEF}...)
 	matches = store.Match(unknownContent, int64(len(unknownContent)))
 	if len(matches) != 0 {
-		t.Errorf("PE sig should NOT match unknown-type content, goit: %v", matches)
+		t.Errorf("PE sig should NOT match unknown-type content, got: %v", matches)
 	}
 }
