@@ -199,13 +199,23 @@ func (s *NDBStore) Match(content []byte, fileSize int64) []string {
 	for _, sig := range s.Signatures {
 		// --- TargetType filter ---
 		// A signature with TargetType == NDBTargetAny (0) matches all files.
-		// Any other value restricts the signature to a specific file format.
-		// If the detected file type is NDBTargetAny (unknown/generic), we still
-		// apply all signatures to avoid missing detections on unrecognised formats.
-		if sig.TargetType != NDBTargetAny && detectedType != NDBTargetAny {
-			if sig.TargetType != detectedType {
-				// Signature is for a different file type — skip to avoid false positives.
-				continue
+		if sig.TargetType != NDBTargetAny {
+			if detectedType != NDBTargetAny {
+				// We detected a specific file type. The signature MUST match it.
+				if sig.TargetType != detectedType {
+					continue
+				}
+			} else {
+				// We couldn't detect the file type (it's generic, like a .pb or .txt).
+				// However, if the signature expects a format we CAN robustly detect
+				// (PE, ELF, Mach-O, OLE2), we can safely skip the signature, because
+				// if the file actually were that format, we would have detected it.
+				if sig.TargetType == NDBTargetPE ||
+					sig.TargetType == NDBTargetELF ||
+					sig.TargetType == NDBTargetMachO ||
+					sig.TargetType == NDBTargetOLE2 {
+					continue
+				}
 			}
 		}
 

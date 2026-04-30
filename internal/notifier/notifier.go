@@ -1,8 +1,8 @@
 package notifier
 
 import (
-	"strings"
 	"fmt"
+	"strings"
 )
 
 // Notifier defines the interface for sending malware detection notifications.

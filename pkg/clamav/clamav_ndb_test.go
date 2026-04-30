@@ -55,10 +55,11 @@ func TestNDBMatchTargetTypeFiltering(t *testing.T) {
 		t.Errorf("PE sig should match PE binary, got: %v", matches)
 	}
 
-	// Unknown-type content containing the pattern — should STILL match (be safe).
+	// Unknown-type content containing the pattern — should NOT match.
+	// We now strictly skip PE (1) signatures on unknown files because PE is robustly detectable.
 	unknownContent := append([]byte{0x89, 0x50, 0x4E, 0x47}, []byte{0xDE, 0xAD, 0xBE, 0xEF}...)
 	matches = store.Match(unknownContent, int64(len(unknownContent)))
-	if len(matches) != 1 || matches[0] != "Win.Trojan.TestOnly" {
-		t.Errorf("PE sig should match unknown-type content (safe fallback), got: %v", matches)
+	if len(matches) != 0 {
+		t.Errorf("PE sig should NOT match unknown-type content, goit: %v", matches)
 	}
 }
