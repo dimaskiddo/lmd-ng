@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"os"
 
+	"runtime"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -59,6 +61,30 @@ func init() {
 			}
 
 			cfg := cfgMgr.GetConfig()
+
+			// Calculate and set CPU limit
+			numCPU := runtime.NumCPU()
+			cpuLimit := cfg.Scanner.CPULimit
+
+			if cpuLimit <= 0 {
+				// Default to half of the total cores if not specified or set to 0
+				cpuLimit = numCPU / 2
+			} else if cpuLimit > numCPU {
+				cpuLimit = numCPU
+			}
+
+			// Ensure at least 1 core is used
+			if cpuLimit < 1 {
+				cpuLimit = 1
+			}
+
+			// Strictly limit the Go runtime to the calculated CPU cores
+			runtime.GOMAXPROCS(cpuLimit)
+			
+			// Update the config so other parts of the app can use the actual limit
+			cfg.Scanner.CPULimit = cpuLimit
+			
+			log.Debug("CPU limit configured", "cpu_limit", cpuLimit, "total_cores", numCPU)
 
 			// Auto-create all required directories on every startup
 			if err := config.EnsureDirectories(cfg); err != nil {

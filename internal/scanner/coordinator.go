@@ -95,6 +95,17 @@ func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string) ([]*S
 	// Channel to collect scan results from concurrent file scans
 	resultsChan := make(chan []*ScanResult)
 
+	// Limit concurrent scanning goroutines based on CPULimit.
+	// We use a factor (e.g., 2x) to keep the CPU saturated while waiting for I/O,
+	// but restrict it enough to prevent unbounded CPU spikes and memory exhaustion.
+	maxWorkers := sc.cfg.Scanner.CPULimit
+	if maxWorkers < 1 {
+		maxWorkers = 1
+	}
+
+	maxConcurrency := maxWorkers * 2
+	sem := make(chan struct{}, maxConcurrency)
+
 	// Goroutine that walks the file tree and spawns scan goroutines
 	walkGroup.Go(func() error {
 		walkErr := sc.walker.Walk(childCtx, rootPath, func(filePath string, fileInfo os.FileInfo) error {
@@ -104,10 +115,19 @@ func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string) ([]*S
 			default:
 			}
 
+			// Acquire a semaphore slot before spawning a new goroutine.
+			// This blocks the walker if we've reached max concurrency.
+			select {
+			case sem <- struct{}{}:
+			case <-childCtx.Done():
+				return childCtx.Err()
+			}
+
 			// Track each scan goroutine with the WaitGroup
 			scanWg.Add(1)
 			go func() {
 				defer scanWg.Done()
+				defer func() { <-sem }() // Release the semaphore slot when done
 
 				fileResults, err := sc.ScanFile(childCtx, filePath)
 				if err != nil {
