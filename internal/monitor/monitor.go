@@ -20,13 +20,13 @@ type Monitor struct {
 	cfg         *config.Config
 	watcher     *fsnotify.Watcher
 	coordinator *scanner.ScanCoordinator
-	notifier    *notifier.EmailNotifier
+	notifier    notifier.Notifier
 	events      chan fsnotify.Event
 	errors      chan error
 }
 
 // NewMonitor creates and initializes a new file system monitor.
-func NewMonitor(cfg *config.Config, coordinator *scanner.ScanCoordinator, emailNotifier *notifier.EmailNotifier) (*Monitor, error) {
+func NewMonitor(cfg *config.Config, coordinator *scanner.ScanCoordinator, n notifier.Notifier) (*Monitor, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create fsnotify watcher: %w", err)
@@ -36,7 +36,7 @@ func NewMonitor(cfg *config.Config, coordinator *scanner.ScanCoordinator, emailN
 		cfg:         cfg,
 		watcher:     watcher,
 		coordinator: coordinator,
-		notifier:    emailNotifier,
+		notifier:    n,
 		events:      make(chan fsnotify.Event),
 		errors:      make(chan error),
 	}
@@ -74,6 +74,7 @@ func (m *Monitor) AddRecursive(path string) error {
 				if d.IsDir() {
 					return filepath.SkipDir
 				}
+
 				return nil
 			}
 		}
@@ -137,7 +138,7 @@ func (m *Monitor) Start(ctx context.Context) error {
 					if quarantined && len(results) > 0 {
 						if m.notifier != nil {
 							if err := m.notifier.SendQuarantineNotification(filePath, results[0].SignatureName); err != nil {
-								log.Error("Failed to send quarantine notification email", "error", err)
+								log.Error("Failed to send quarantine notification", "error", err)
 							}
 						}
 					}

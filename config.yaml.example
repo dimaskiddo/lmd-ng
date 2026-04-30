@@ -67,12 +67,17 @@ updater:
     - "main.cvd"
 
 notification:
-  enabled: false
-  smtp_host: "smtp.example.com"
-  smtp_port: 587
-  smtp_username: "user@example.com"
-  smtp_password: "secretpassword"
-  smtp_use_ssl_tls: false           # Set to true for port 465, false for 587 (uses STARTTLS if available)
-  sender: "lmd-ng@example.com"
-  recipients:
-    - "admin@example.com"
+  email:
+    enabled: false
+    smtp_host: "smtp.example.com"
+    smtp_port: 587
+    smtp_username: "user@example.com"
+    smtp_password: "secretpassword"
+    smtp_use_ssl_tls: false           # Set to true for port 465, false for 587 (uses STARTTLS if available)
+    sender: "lmd-ng@example.com"
+    recipients:
+      - "admin@example.com"
+  telegram:
+    enabled: false
+    bot_token: "YOUR-TELEGRAM-BOT-TOKEN"
+    chat_id: "YOUR-TELEGRAM-CHAT-ID"

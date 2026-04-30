@@ -92,8 +92,14 @@ type UpdaterConfig struct {
 	ClamAVDatabases      []string `yaml:"clamav_databases" mapstructure:"clamav_databases"`
 }
 
-// NotificationConfig holds email notification settings.
+// NotificationConfig holds notification settings.
 type NotificationConfig struct {
+	Email    EmailNotificationConfig    `yaml:"email" mapstructure:"email"`
+	Telegram TelegramNotificationConfig `yaml:"telegram" mapstructure:"telegram"`
+}
+
+// EmailNotificationConfig holds email notification settings.
+type EmailNotificationConfig struct {
 	Enabled       bool     `yaml:"enabled" mapstructure:"enabled"`
 	SMTPHost      string   `yaml:"smtp_host" mapstructure:"smtp_host"`
 	SMTPPort      int      `yaml:"smtp_port" mapstructure:"smtp_port"`
@@ -102,6 +108,13 @@ type NotificationConfig struct {
 	SMTPUseSSLTLS bool     `yaml:"smtp_use_ssl_tls" mapstructure:"smtp_use_ssl_tls"`
 	Sender        string   `yaml:"sender" mapstructure:"sender"`
 	Recipients    []string `yaml:"recipients" mapstructure:"recipients"`
+}
+
+// TelegramNotificationConfig holds Telegram notification settings.
+type TelegramNotificationConfig struct {
+	Enabled  bool   `yaml:"enabled" mapstructure:"enabled"`
+	BotToken string `yaml:"bot_token" mapstructure:"bot_token"`
+	ChatID   string `yaml:"chat_id" mapstructure:"chat_id"`
 }
 
 // SetDefaultConfig sets default values for the configuration.
@@ -166,14 +179,18 @@ func SetDefaultConfig(config *Config) {
 	config.Updater.ClamAVMirrorURL = "https://database.clamav.net"
 	config.Updater.ClamAVDatabases = []string{"daily.cvd", "bytecode.cvd", "main.cvd"}
 
-	config.Notification.Enabled = false
-	config.Notification.SMTPHost = "smtp.example.com"
-	config.Notification.SMTPPort = 587
-	config.Notification.SMTPUsername = "user@example.com"
-	config.Notification.SMTPPassword = "secretpassword"
-	config.Notification.SMTPUseSSLTLS = false
-	config.Notification.Sender = "lmd-ng@example.com"
-	config.Notification.Recipients = []string{"admin@example.com"}
+	config.Notification.Email.Enabled = false
+	config.Notification.Email.SMTPHost = "smtp.example.com"
+	config.Notification.Email.SMTPPort = 587
+	config.Notification.Email.SMTPUsername = "user@example.com"
+	config.Notification.Email.SMTPPassword = "secretpassword"
+	config.Notification.Email.SMTPUseSSLTLS = false
+	config.Notification.Email.Sender = "lmd-ng@example.com"
+	config.Notification.Email.Recipients = []string{"admin@example.com"}
+
+	config.Notification.Telegram.Enabled = false
+	config.Notification.Telegram.BotToken = "YOUR_TELEGRAM_BOT_TOKEN"
+	config.Notification.Telegram.ChatID = "YOUR_TELEGRAM_CHAT_ID"
 }
 
 // ResolvePaths ensures all directory and file paths in the configuration

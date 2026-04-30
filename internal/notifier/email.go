@@ -16,11 +16,11 @@ import (
 
 // EmailNotifier handles sending email notifications for malware detections.
 type EmailNotifier struct {
-	cfg *config.NotificationConfig
+	cfg *config.EmailNotificationConfig
 }
 
 // NewEmailNotifier creates a new EmailNotifier with the given configuration.
-func NewEmailNotifier(cfg *config.NotificationConfig) *EmailNotifier {
+func NewEmailNotifier(cfg *config.EmailNotificationConfig) *EmailNotifier {
 	return &EmailNotifier{
 		cfg: cfg,
 	}

@@ -31,6 +31,7 @@ func buildEngines(cfg *config.Config) ([]scanner.SignatureEngine, error) {
 		if clamErr != nil {
 			return nil, clamErr
 		}
+
 		engines = append(engines, clamEngine)
 	}
 
@@ -67,9 +68,18 @@ func daemonCmd() *cobra.Command {
 			// when signatures are updated on disk.
 			coordinator.EngineFactory = buildEngines
 
-			emailNotifier := notifier.NewEmailNotifier(&cfg.Notification)
+			var notifiers []notifier.Notifier
+			if cfg.Notification.Email.Enabled {
+				notifiers = append(notifiers, notifier.NewEmailNotifier(&cfg.Notification.Email))
+			}
 
-			mon, err := monitor.NewMonitor(cfg, coordinator, emailNotifier)
+			if cfg.Notification.Telegram.Enabled {
+				notifiers = append(notifiers, notifier.NewTelegramNotifier(&cfg.Notification.Telegram))
+			}
+
+			multiNotifier := notifier.NewMultiNotifier(notifiers...)
+
+			mon, err := monitor.NewMonitor(cfg, coordinator, multiNotifier)
 			if err != nil {
 				log.Error("Failed to create monitor", "error", err)
 				os.Exit(1)
