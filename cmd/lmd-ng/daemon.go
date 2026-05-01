@@ -4,8 +4,11 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
@@ -36,6 +39,84 @@ func buildEngines(cfg *config.Config) ([]scanner.SignatureEngine, error) {
 	}
 
 	return engines, nil
+}
+
+// watchSignatures watches the signature directories for changes and triggers
+// engine reload. This allows manual `lmd-ng update` executions to signal the
+// running daemon to reload signatures.
+func watchSignatures(ctx context.Context, cfg *config.Config, coordinator *scanner.ScanCoordinator) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Error("Failed to create signature watcher", "error", err)
+		return
+	}
+
+	// Ensure directories exist before watching
+	os.MkdirAll(cfg.App.SignaturesDir, 0755)
+	if err := watcher.Add(cfg.App.SignaturesDir); err != nil {
+		log.Warn("Failed to watch signatures directory", "path", cfg.App.SignaturesDir, "error", err)
+	}
+
+	if cfg.Scanner.ClamAVEnabled {
+		clamDBPath := cfg.Scanner.ClamAVDBPath
+		if clamDBPath == "" {
+			clamDBPath = cfg.App.ClamAVDir
+		}
+		if clamDBPath != "" {
+			os.MkdirAll(clamDBPath, 0755)
+			if err := watcher.Add(clamDBPath); err != nil {
+				log.Warn("Failed to watch ClamAV DB directory", "path", clamDBPath, "error", err)
+			}
+		}
+	}
+
+	go func() {
+		defer watcher.Close()
+		var reloadTimer *time.Timer
+
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+
+				// Look for file changes (Write, Rename, Create)
+				if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0 {
+					// Ignore temporary files created during download
+					if strings.HasSuffix(event.Name, ".tmp") {
+						continue
+					}
+
+					// Debounce to avoid reloading multiple times for a single update
+					if reloadTimer != nil {
+						reloadTimer.Stop()
+					}
+
+					reloadTimer = time.AfterFunc(5*time.Second, func() {
+						log.Info("Signature updates detected on disk, reloading engines...")
+						if err := coordinator.ReloadEngines(); err != nil {
+							log.Error("Failed to reload signature engines", "error", err)
+						}
+					})
+				}
+
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+
+				log.Error("Signature watcher error", "error", err)
+
+			case <-ctx.Done():
+				if reloadTimer != nil {
+					reloadTimer.Stop()
+				}
+
+				return
+			}
+		}
+	}()
 }
 
 func daemonCmd() *cobra.Command {
@@ -93,12 +174,8 @@ func daemonCmd() *cobra.Command {
 
 			updaterSvc := updater.NewUpdater(cfg)
 
-			// Wire the reload callback: after signatures update, reload engines.
-			updaterSvc.OnSignaturesUpdated = func() {
-				if err := coordinator.ReloadEngines(); err != nil {
-					log.Error("Failed to reload signature engines after update", "error", err)
-				}
-			}
+			// Watch signature directories for changes (both internal and external updates)
+			watchSignatures(ctx, cfg, coordinator)
 
 			sched, err := scheduler.NewScheduler(cfg, coordinator, updaterSvc)
 			if err != nil {
