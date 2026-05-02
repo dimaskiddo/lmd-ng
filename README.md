@@ -13,8 +13,10 @@ Whether you're protecting a high-traffic server, a personal workstation, or a fl
 *   **🌍 Truly Cross-Platform:** Breaking free from the Linux-only roots of the original LMD, LMD-NG runs natively on **Windows**, **macOS**, and **Linux**! 🚀
 *   **🕵️ Real-Time Protection:** Native file system monitoring (using `fsnotify`) catches threats the moment they land.
 *   **🔄 Modern Signature Updates:** Seamlessly pulls the latest threat definitions to keep you safe.
+*   **🌐 Smart Updater:** Internet-aware signature updater that validates connectivity and dynamically manages ClamAV User-Agent versions directly from GitHub.
+*   **🚀 Auto-Tuned System Limits:** Automatically optimizes file descriptor limits to ensure smooth performance during heavy scans, even on restricted environments like macOS.
 *   **🦠 Native ClamAV Support:** Built-in loader for ClamAV databases with **zero** `libclamav` dependency. Access a massive signature library natively! 
-*   **🛠️ Service Integration:** Easily install/uninstall as a system service with a single command.
+*   **🛠️ Service Integration:** Easily install, uninstall, start, stop, or restart as a system service with built-in commands.
 *   **🔒 Secure Quarantine:** Safely isolates threats with optional AES encryption to prevent accidental execution.
 *   **📧 Email Notifications:** Get instant HTML-formatted alerts when malware is detected. Supports SMTP with SSL/TLS.
 *   **📊 Structured Logging:** Clean, modern logs using Go's `slog` for better observability.
@@ -103,8 +105,12 @@ LMD-NG comes with a powerful CLI. Here are the most common commands:
 *   **`lmd-ng quarantine add <file>`**: Manually move a suspicious file to quarantine. 📥
 *   **`lmd-ng quarantine restore <id|path>`**: Restore a file from quarantine to its original location. 📤
 *   **`lmd-ng quarantine remove <id|path>`**: Permanently delete a quarantined file (requires `--force`). 🗑️
-*   **`lmd-ng service install`**: Automatically register LMD-NG as a background service (supports Windows Services, macOS Launchd, and Linux Systemd/Upstart). ⚙️
-*   **`lmd-ng service uninstall`**: Cleanly remove the system service. 🧹
+*   **`lmd-ng service <action>`**: Manage LMD-NG as a background service (supports Windows Services, macOS Launchd, and Linux Systemd/Upstart). ⚙️
+    *   `install`: Register LMD-NG as a system service.
+    *   `uninstall`: Stop and remove the system service.
+    *   `start`: Start the LMD-NG background service.
+    *   `stop`: Stop the LMD-NG background service.
+    *   `restart`: Restart the LMD-NG background service.
 *   **`lmd-ng version`**: Display the version information. ℹ️
 
 ---
