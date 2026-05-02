@@ -26,7 +26,11 @@ func SetMaxOpenFiles() {
 		// On some systems (especially macOS), setting the limit to Max might fail
 		// with "invalid argument" if Max is "infinity" (e.g. INT64_MAX).
 		// We fallback to known high sensible limits.
-		fallbacks := []uint64{524288, 262144, 100000, 65535, 24576, 10240, 8192}
+		fallbacks := []uint64{
+			2147483648, 1073741824, 536870912, 268435456, 134217728, 67108864,
+			33554432, 16777216, 8388608, 4194304, 2097152, 1048576,
+			524288, 262144, 100000, 65535, 24576, 10240, 8192,
+		}
 
 		success := false
 		for _, fallback := range fallbacks {
