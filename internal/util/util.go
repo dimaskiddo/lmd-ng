@@ -2,8 +2,10 @@ package util
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func ParseSizeString(sizeStr string) (int64, error) {
@@ -42,4 +44,16 @@ func ParseSizeString(sizeStr string) (int64, error) {
 	}
 
 	return value * multiplier, nil
+}
+
+// HasInternetAccess performs a fast TCP dial to a highly available public domain
+// to determine if the system has working DNS resolution and outbound internet access.
+func HasInternetAccess() bool {
+	conn, err := net.DialTimeout("tcp", "google.com:443", 2*time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+
+	return true
 }

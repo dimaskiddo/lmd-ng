@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
+	"github.com/dimaskiddo/lmd-ng/internal/util"
 )
 
 // Updater handles downloading and applying signature database updates.
@@ -48,6 +50,12 @@ func NewUpdater(cfg *config.Config) *Updater {
 
 // Update performs all configured signature updates (LMD and/or ClamAV).
 func (u *Updater) Update(ctx context.Context) error {
+	// Fast internet connectivity check
+	if !util.HasInternetAccess() {
+		log.Warn("No internet connection detected, skipping signature updates")
+		return fmt.Errorf("no internet connection")
+	}
+
 	var updated bool
 
 	// Update LMD native signatures
@@ -165,6 +173,9 @@ func (u *Updater) updateClamAV(ctx context.Context) (bool, error) {
 
 	var anyUpdated bool
 
+	// Retrieve dynamic ClamAV version from GitHub API for User-Agent
+	clamAVVersion := u.getClamAVVersion(ctx)
+
 	for _, dbName := range databases {
 		select {
 		case <-ctx.Done():
@@ -176,7 +187,7 @@ func (u *Updater) updateClamAV(ctx context.Context) (bool, error) {
 		downloadURL := mirrorURL + "/" + dbName
 		localPath := filepath.Join(clamDBPath, dbName)
 
-		didUpdate, err := u.downloadClamAVDatabase(ctx, downloadURL, localPath)
+		didUpdate, err := u.downloadClamAVDatabase(ctx, downloadURL, localPath, clamAVVersion)
 		if err != nil {
 			log.Warn("Failed to update ClamAV database, skipping", "database", dbName, "error", err)
 			continue
@@ -195,7 +206,7 @@ func (u *Updater) updateClamAV(ctx context.Context) (bool, error) {
 
 // downloadClamAVDatabase downloads a single ClamAV database file if it has been
 // modified since the local copy. Returns true if the file was downloaded/updated.
-func (u *Updater) downloadClamAVDatabase(ctx context.Context, url, localPath string) (bool, error) {
+func (u *Updater) downloadClamAVDatabase(ctx context.Context, url, localPath, clamAVVersion string) (bool, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return false, fmt.Errorf("failed to create HTTP request for %s: %w", url, err)
@@ -203,8 +214,6 @@ func (u *Updater) downloadClamAVDatabase(ctx context.Context, url, localPath str
 
 	// Use a freshclam-compatible User-Agent so the official ClamAV CDN accepts our download requests
 	// The CDN checks this header and rejects clients that don't identify as ClamAV/freshclam.
-	clamAVVersion := "1.4.2"
-
 	osName := runtime.GOOS
 	if len(osName) > 0 {
 		osName = strings.ToUpper(osName[:1]) + osName[1:]
@@ -441,4 +450,52 @@ func (u *Updater) extractTarGz(archivePath, destDir string) error {
 
 	log.Info("Extracted archive", "path", archivePath, "destination", destDir)
 	return nil
+}
+
+// getClamAVVersion dynamically fetches the latest ClamAV release version
+// from GitHub API to bypass the CDN restriction. Falls back to a hardcoded
+// version if the request fails or is rate-limited.
+func (u *Updater) getClamAVVersion(ctx context.Context) string {
+	defaultVersion := "1.5.2"
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/repos/Cisco-Talos/clamav/releases/latest", nil)
+	if err != nil {
+		return defaultVersion
+	}
+
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	// Set a shorter timeout specifically for the API call to avoid hanging
+	// the whole update process if GitHub API is slow.
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Debug("Failed to fetch ClamAV version from GitHub API, using fallback", "error", err)
+		return defaultVersion
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Debug("GitHub API returned non-OK status, using fallback", "status", resp.StatusCode)
+		return defaultVersion
+	}
+
+	var result struct {
+		TagName string `json:"tag_name"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Debug("Failed to decode GitHub API response, using fallback", "error", err)
+		return defaultVersion
+	}
+
+	version := strings.TrimPrefix(result.TagName, "clamav-")
+	version = strings.TrimPrefix(version, "v")
+
+	if version == "" {
+		return defaultVersion
+	}
+
+	log.Debug("Fetched latest ClamAV version from GitHub API", "version", version)
+	return version
 }

@@ -2,11 +2,10 @@ package notifier
 
 import (
 	"fmt"
-	"net"
 	"strings"
-	"time"
 
 	"github.com/dimaskiddo/lmd-ng/internal/log"
+	"github.com/dimaskiddo/lmd-ng/internal/util"
 )
 
 // Notifier defines the interface for sending malware detection notifications.
@@ -35,7 +34,7 @@ func (m *MultiNotifier) SendQuarantineNotification(filePath, signatureName strin
 
 	// Fast internet connectivity check. If there is no internet, we silently
 	// drop the notification to avoid hanging goroutines waiting for timeouts.
-	if !hasInternetAccess() {
+	if !util.HasInternetAccess() {
 		log.Debug("No internet connection detected, dropping notification", "file", filePath)
 		return nil
 	}
@@ -53,16 +52,4 @@ func (m *MultiNotifier) SendQuarantineNotification(filePath, signatureName strin
 	}
 
 	return nil
-}
-
-// hasInternetAccess performs a fast TCP dial to a highly available public domain
-// to determine if the system has working DNS resolution and outbound internet access.
-func hasInternetAccess() bool {
-	conn, err := net.DialTimeout("tcp", "google.com:443", 2*time.Second)
-	if err != nil {
-		return false
-	}
-	conn.Close()
-
-	return true
 }
