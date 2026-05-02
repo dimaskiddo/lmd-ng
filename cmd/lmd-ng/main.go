@@ -13,6 +13,7 @@ import (
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
+	"github.com/dimaskiddo/lmd-ng/internal/syslimits"
 	"github.com/dimaskiddo/lmd-ng/internal/updater"
 )
 
@@ -62,6 +63,10 @@ func init() {
 
 			cfg := cfgMgr.GetConfig()
 
+			// Attempt to raise the max open files limit to avoid "too many open files" errors
+			// on systems like macOS and Linux.
+			syslimits.SetMaxOpenFiles()
+
 			// Calculate and set CPU limit
 			numCPU := runtime.NumCPU()
 			cpuLimit := cfg.Scanner.CPULimit
@@ -80,10 +85,9 @@ func init() {
 
 			// Strictly limit the Go runtime to the calculated CPU cores
 			runtime.GOMAXPROCS(cpuLimit)
-			
+
 			// Update the config so other parts of the app can use the actual limit
 			cfg.Scanner.CPULimit = cpuLimit
-			
 			log.Debug("CPU limit configured", "cpu_limit", cpuLimit, "total_cores", numCPU)
 
 			// Auto-create all required directories on every startup

@@ -73,13 +73,6 @@ func InstallService(_ *config.Config) error {
 		return fmt.Errorf("failed to install service: %w", err)
 	}
 
-	if err = svc.Start(); err != nil {
-		// The unit is already installed; surface the start error but do not
-		// roll back the installation automatically — the operator can inspect
-		// and start manually.
-		return fmt.Errorf("service installed but failed to start: %w", err)
-	}
-
 	return nil
 }
 
@@ -105,6 +98,63 @@ func UninstallService(_ *config.Config) error {
 
 	if err = svc.Uninstall(); err != nil {
 		return fmt.Errorf("failed to uninstall service: %w", err)
+	}
+
+	return nil
+}
+
+// StartService starts the LMD-NG system service.
+func StartService(_ *config.Config) error {
+	if err := checkPrivilege(); err != nil {
+		return err
+	}
+
+	svcConfig := &kservice.Config{Name: "lmd-ng"}
+	svc, err := kservice.New(&LMDService{}, svcConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create service handle: %w", err)
+	}
+
+	if err = svc.Start(); err != nil {
+		return fmt.Errorf("failed to start service: %w", err)
+	}
+
+	return nil
+}
+
+// StopService stops the LMD-NG system service.
+func StopService(_ *config.Config) error {
+	if err := checkPrivilege(); err != nil {
+		return err
+	}
+
+	svcConfig := &kservice.Config{Name: "lmd-ng"}
+	svc, err := kservice.New(&LMDService{}, svcConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create service handle: %w", err)
+	}
+
+	if err = svc.Stop(); err != nil {
+		return fmt.Errorf("failed to stop service: %w", err)
+	}
+
+	return nil
+}
+
+// RestartService restarts the LMD-NG system service.
+func RestartService(_ *config.Config) error {
+	if err := checkPrivilege(); err != nil {
+		return err
+	}
+
+	svcConfig := &kservice.Config{Name: "lmd-ng"}
+	svc, err := kservice.New(&LMDService{}, svcConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create service handle: %w", err)
+	}
+
+	if err = svc.Restart(); err != nil {
+		return fmt.Errorf("failed to restart service: %w", err)
 	}
 
 	return nil

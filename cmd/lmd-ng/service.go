@@ -24,7 +24,7 @@ Service install and uninstall operations require elevated privileges:
 
 	serviceCmd.AddCommand(&cobra.Command{
 		Use:   "install",
-		Short: "Install and Start LMD-NG as System Service",
+		Short: "Install LMD-NG as System Service",
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := cfgMgr.GetConfig()
 			if err := service.InstallService(cfg); err != nil {
@@ -38,7 +38,7 @@ Service install and uninstall operations require elevated privileges:
 				os.Exit(1)
 			}
 
-			log.Info("LMD-NG service installed and started successfully.")
+			log.Info("LMD-NG service installed successfully.")
 		},
 	})
 
@@ -59,6 +59,66 @@ Service install and uninstall operations require elevated privileges:
 			}
 
 			log.Info("LMD-NG service stopped and uninstalled successfully.")
+		},
+	})
+
+	serviceCmd.AddCommand(&cobra.Command{
+		Use:   "start",
+		Short: "Start LMD-NG System Service",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg := cfgMgr.GetConfig()
+			if err := service.StartService(cfg); err != nil {
+				if errors.Is(err, service.ErrInsufficientPrivilege) {
+					fmt.Fprintln(os.Stderr, "Error:", err)
+					fmt.Fprintln(os.Stderr, "Hint: Re-run with 'sudo lmd-ng service start' (Linux/macOS) or from an elevated Administrator prompt (Windows).")
+					os.Exit(1)
+				}
+
+				log.Error("Service start failed", "error", err)
+				os.Exit(1)
+			}
+
+			log.Info("LMD-NG service started successfully.")
+		},
+	})
+
+	serviceCmd.AddCommand(&cobra.Command{
+		Use:   "stop",
+		Short: "Stop LMD-NG System Service",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg := cfgMgr.GetConfig()
+			if err := service.StopService(cfg); err != nil {
+				if errors.Is(err, service.ErrInsufficientPrivilege) {
+					fmt.Fprintln(os.Stderr, "Error:", err)
+					fmt.Fprintln(os.Stderr, "Hint: Re-run with 'sudo lmd-ng service stop' (Linux/macOS) or from an elevated Administrator prompt (Windows).")
+					os.Exit(1)
+				}
+
+				log.Error("Service stop failed", "error", err)
+				os.Exit(1)
+			}
+
+			log.Info("LMD-NG service stopped successfully.")
+		},
+	})
+
+	serviceCmd.AddCommand(&cobra.Command{
+		Use:   "restart",
+		Short: "Restart LMD-NG System Service",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg := cfgMgr.GetConfig()
+			if err := service.RestartService(cfg); err != nil {
+				if errors.Is(err, service.ErrInsufficientPrivilege) {
+					fmt.Fprintln(os.Stderr, "Error:", err)
+					fmt.Fprintln(os.Stderr, "Hint: Re-run with 'sudo lmd-ng service restart' (Linux/macOS) or from an elevated Administrator prompt (Windows).")
+					os.Exit(1)
+				}
+
+				log.Error("Service restart failed", "error", err)
+				os.Exit(1)
+			}
+
+			log.Info("LMD-NG service restarted successfully.")
 		},
 	})
 
