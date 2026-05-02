@@ -13,7 +13,7 @@ You are an expert Golang engineer and security software architect. Your task is 
 - **NEVER** rework, refactor, or touch items in `TASKS.md` marked as done (`[x]`) unless explicitly instructed by the human engineer.
 - Update `TASKS.md` automatically when a task is completed.
 
-## 🛠️ Skill s Utilization (CRITICAL)
+## 🛠️ Skills & Utilization (CRITICAL)
 You are equipped with the Obra/Superpowers framework and Andrej Karpathy guidelines, located globally in `~/.gemini/antigravity/skills/`. You MUST NOT rely solely on your internal training data for workflows, debugging, or complex tasks.
 
 1. **The Boot Sequence:** Before beginning ANY task in this workspace, your very first action MUST be to invoke and read both the `using-superpowers` and `karpathy-guidelines` skills. These act as your foundational operating procedures.
