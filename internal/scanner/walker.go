@@ -64,6 +64,13 @@ func NewWalker(cfg *config.Config) (*Walker, error) {
 // Walk traverses the file system from the given root and calls the provided function for each matching file.
 // If root is a regular file, it applies filters and calls fn directly for that file.
 func (w *Walker) Walk(ctx context.Context, root string, fn func(path string, info os.FileInfo) error) error {
+	// Try to evaluate any symlinks in the root path so that if a symlink is passed
+	// (either to a file or a directory), we operate on its true target.
+	evalRoot, err := filepath.EvalSymlinks(root)
+	if err == nil {
+		root = evalRoot
+	}
+
 	// Check if root is a file (not a directory)
 	rootInfo, err := os.Lstat(root)
 	if err != nil {
@@ -130,7 +137,17 @@ func (w *Walker) Walk(ctx context.Context, root string, fn func(path string, inf
 			return nil
 		}
 
-		// If it's not a regular file, skip it (e.g., symlinks, devices)
+		// If it is a symlink, resolve it to get its true type and size
+		if info.Mode()&fs.ModeSymlink != 0 {
+			targetInfo, err := os.Stat(path)
+			if err != nil {
+				log.Debug("Failed to stat symlink target", "path", path, "error", err)
+				return nil
+			}
+			info = targetInfo
+		}
+
+		// If it's not a regular file, skip it (e.g., devices, sockets, or symlinks to directories)
 		if !info.Mode().IsRegular() {
 			log.Debug("Skipping non-regular file", "path", path, "mode", info.Mode())
 			return nil

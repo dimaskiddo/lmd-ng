@@ -53,6 +53,11 @@ func NewMonitor(cfg *config.Config, coordinator *scanner.ScanCoordinator, n noti
 
 // AddRecursive adds a path and all its subdirectories to the file system watcher.
 func (m *Monitor) AddRecursive(path string) error {
+	// Evaluate symlinks so we can watch the actual directory
+	if evalPath, err := filepath.EvalSymlinks(path); err == nil {
+		path = evalPath
+	}
+
 	return filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			// Log permission errors but continue walking
@@ -87,8 +92,10 @@ func (m *Monitor) AddRecursive(path string) error {
 			}
 
 			if err := m.watcher.Add(absPath); err != nil {
-				log.Error("Failed to add path to watcher", "path", absPath, "error", err)
-				return err
+				// Log the error but continue walking. fsnotify (especially kqueue on macOS)
+				// may fail to add a directory if it contains a broken symlink.
+				log.Warn("Failed to add path to watcher (continuing)", "path", absPath, "error", err)
+				return nil
 			}
 
 			log.Info("Monitoring directory", "path", absPath)
