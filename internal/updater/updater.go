@@ -125,8 +125,16 @@ func (u *Updater) updateLMDSignatures(ctx context.Context) (bool, error) {
 
 	// Write version file so we can skip re-downloads next time
 	versionFileName := filepath.Base(u.cfg.Updater.SignatureVersionURL)
-	if err := os.WriteFile(filepath.Join(sigDirPath, versionFileName), []byte(remoteVer), 0644); err != nil {
+	versionPath := filepath.Join(sigDirPath, versionFileName)
+	tmpVersionPath := versionPath + ".tmp"
+
+	if err := os.WriteFile(tmpVersionPath, []byte(remoteVer), 0644); err != nil {
 		return false, fmt.Errorf("failed to write signature version file: %w", err)
+	}
+
+	if err := os.Rename(tmpVersionPath, versionPath); err != nil {
+		os.Remove(tmpVersionPath)
+		return false, fmt.Errorf("failed to rename signature version file: %w", err)
 	}
 
 	log.Info("LMD signatures updated successfully", "version", remoteVer)
@@ -396,17 +404,25 @@ func (u *Updater) extractTarGz(archivePath, destDir string) error {
 				return fmt.Errorf("failed to create directory for %s: %w", targetPath, err)
 			}
 
-			outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
+			tmpPath := targetPath + ".tmp"
+			outFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
 			if err != nil {
-				return fmt.Errorf("failed to create file %s: %w", targetPath, err)
+				return fmt.Errorf("failed to create temp file %s: %w", tmpPath, err)
 			}
 
 			if _, err := io.Copy(outFile, tarReader); err != nil {
 				outFile.Close()
-				return fmt.Errorf("failed to write file content to %s: %w", targetPath, err)
+				os.Remove(tmpPath)
+				return fmt.Errorf("failed to write file content to %s: %w", tmpPath, err)
 			}
 
+			outFile.Sync()
 			outFile.Close()
+
+			if err := os.Rename(tmpPath, targetPath); err != nil {
+				os.Remove(tmpPath)
+				return fmt.Errorf("failed to rename temp file to %s: %w", targetPath, err)
+			}
 
 		case tar.TypeSymlink:
 			if err := os.Symlink(header.Linkname, targetPath); err != nil {

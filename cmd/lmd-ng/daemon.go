@@ -62,6 +62,7 @@ func watchSignatures(ctx context.Context, cfg *config.Config, coordinator *scann
 		if clamDBPath == "" {
 			clamDBPath = cfg.App.ClamAVDir
 		}
+
 		if clamDBPath != "" {
 			os.MkdirAll(clamDBPath, 0755)
 			if err := watcher.Add(clamDBPath); err != nil {
@@ -84,7 +85,7 @@ func watchSignatures(ctx context.Context, cfg *config.Config, coordinator *scann
 				// Look for file changes (Write, Rename, Create)
 				if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0 {
 					// Ignore temporary files created during download
-					if strings.HasSuffix(event.Name, ".tmp") {
+					if strings.Contains(event.Name, ".tmp") {
 						continue
 					}
 
