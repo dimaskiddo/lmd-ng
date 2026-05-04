@@ -9,7 +9,7 @@ Whether you're protecting a high-traffic server, a personal workstation, or a fl
 ## ✨ Why LMD-NG?
 
 *   **⚡ Blazing Performance:** Rewritten in Pure Go for maximum efficiency and minimal resource footprint.
-*   **📦 Zero Dependencies:** Compiled with `CGO_ENABLED=0`. It's a single static binary that just *works*.
+*   **📦 Cross-Platform CGO:** Compiled with `CGO_ENABLED=1` powered by Zig C/C++ toolchains for robust native bindings while remaining a highly portable binary.
 *   **🌍 Truly Cross-Platform:** Breaking free from the Linux-only roots of the original LMD, LMD-NG runs natively on **Windows**, **macOS**, and **Linux**! 🚀
 *   **🕵️ Real-Time Protection:** Native file system monitoring (using `fsnotify`) catches threats the moment they land.
 *   **🔄 Modern Signature Updates:** Seamlessly pulls the latest threat definitions to keep you safe.

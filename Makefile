@@ -1,4 +1,4 @@
-BUILD_CGO_ENABLED  := 0
+BUILD_CGO_ENABLED  := 1
 SERVICE_NAME       := lmd-ng
 REBASE_URL         := "github.com/dimaskiddo/lmd-ng"
 COMMIT_MSG         := "update improvement"
@@ -40,7 +40,7 @@ publish:
 build:
 	make vendor
 	make init-dist
-	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build -ldflags="-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -trimpath -a -o dist/$(SERVICE_NAME) ./cmd/lmd-ng
+	CC="./hack/zcc.sh" CXX="./hack/zcxx.sh" CGO_ENABLED=$(BUILD_CGO_ENABLED) go build -ldflags="-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -trimpath -a -o dist/$(SERVICE_NAME) ./cmd/lmd-ng
 	echo "Build '$(SERVICE_NAME)' complete."
 
 docker-build:

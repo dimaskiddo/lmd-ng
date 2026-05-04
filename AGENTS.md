@@ -25,9 +25,10 @@ You are equipped with the Obra/Superpowers framework and Andrej Karpathy guideli
 
 ## 🏗️ Strict Architectural Constraints
 
-### 1. Pure Go (No CGO)
-- The application MUST be compiled with `CGO_ENABLED=0`. 
-- You must not use any C-bindings or libraries that require CGO. All dependencies and vendor libraries must be pure Go.
+### 1. CGO Enabled (via Zig Toolchain)
+- The application MUST be compiled with `CGO_ENABLED=1`. 
+- All C/C++ cross-compilation MUST strictly utilize the Zig compiler wrappers located at `hack/zcc.sh` (for C) and `hack/zcxx.sh` (for C++).
+- Standard `gcc` or `clang` must not be used to ensure seamless multi-platform targeting via Zig.
 
 ### 2. Native OS Implementation (No OS CLI Wrappers)
 - LMD heavily relies on Linux binaries (`find`, `inotifywait`, `awk`, `sed`, `grep`). You must **NOT** use `os/exec` to call these tools.
