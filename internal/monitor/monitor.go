@@ -15,30 +15,37 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/scanner"
 )
 
+// ScanFunc is a function that scans a single file and returns the results and
+// whether the file was quarantined. This abstraction decouples the monitor from
+// the ScanCoordinator, allowing both local (monolithic) and remote (DBS client)
+// scan implementations.
+type ScanFunc func(ctx context.Context, filePath string) ([]*scanner.ScanResult, bool)
+
 // Monitor monitors file system events and triggers scans.
 type Monitor struct {
-	cfg         *config.Config
-	watcher     *fsnotify.Watcher
-	coordinator *scanner.ScanCoordinator
-	notifier    notifier.Notifier
-	events      chan fsnotify.Event
-	errors      chan error
+	cfg      *config.Config
+	watcher  *fsnotify.Watcher
+	scanFunc ScanFunc
+	notifier notifier.Notifier
+	events   chan fsnotify.Event
+	errors   chan error
 }
 
 // NewMonitor creates and initializes a new file system monitor.
-func NewMonitor(cfg *config.Config, coordinator *scanner.ScanCoordinator, n notifier.Notifier) (*Monitor, error) {
+// The scanFunc callback is invoked for each file event that requires scanning.
+func NewMonitor(cfg *config.Config, scanFunc ScanFunc, n notifier.Notifier) (*Monitor, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create fsnotify watcher: %w", err)
 	}
 
 	m := &Monitor{
-		cfg:         cfg,
-		watcher:     watcher,
-		coordinator: coordinator,
-		notifier:    n,
-		events:      make(chan fsnotify.Event),
-		errors:      make(chan error),
+		cfg:      cfg,
+		watcher:  watcher,
+		scanFunc: scanFunc,
+		notifier: n,
+		events:   make(chan fsnotify.Event),
+		errors:   make(chan error),
 	}
 
 	// Add initial paths to watch based on configuration
@@ -141,7 +148,7 @@ func (m *Monitor) Start(ctx context.Context) error {
 				// Trigger a scan for the affected file
 				log.Info("File system event detected, triggering scan", "file", event.Name, "op", event.Op.String())
 				go func(filePath string) {
-					results, quarantined := m.coordinator.ScanFileAndAct(ctx, filePath)
+					results, quarantined := m.scanFunc(ctx, filePath)
 					if quarantined && len(results) > 0 {
 						if m.notifier != nil {
 							// Fire and forget: send notification asynchronously

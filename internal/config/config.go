@@ -9,6 +9,7 @@ import (
 type Config struct {
 	App          AppConfig          `yaml:"app" mapstructure:"app"`
 	Logging      LoggingConfig      `yaml:"logging" mapstructure:"logging"`
+	Server       ServerConfig       `yaml:"server" mapstructure:"server"`
 	Monitor      MonitorConfig      `yaml:"monitor" mapstructure:"monitor"`
 	Quarantine   QuarantineConfig   `yaml:"quarantine" mapstructure:"quarantine"`
 	Scanner      ScannerConfig      `yaml:"scanner" mapstructure:"scanner"`
@@ -37,10 +38,22 @@ type LoggingConfig struct {
 	Compress   bool   `yaml:"compress" mapstructure:"compress"`
 }
 
-// MonitorConfig holds file system monitoring settings.
-type MonitorConfig struct {
-	Paths       []string `yaml:"paths" mapstructure:"paths"`
-	ExcludeDirs []string `yaml:"exclude_dirs" mapstructure:"exclude_dirs"`
+// ServerConfig holds DBS server/client connection configuration.
+type ServerConfig struct {
+	Network    string    `yaml:"network" mapstructure:"network"`         // "unix" or "tcp" (default: "unix")
+	SocketPath string    `yaml:"socket_path" mapstructure:"socket_path"` // Unix socket path
+	Address    string    `yaml:"address" mapstructure:"address"`         // TCP listen address
+	TLS        TLSConfig `yaml:"tls" mapstructure:"tls"`
+}
+
+// TLSConfig holds mutual TLS settings. TLS is always enabled — there is no
+// toggle. Communication between DBS server and clients is always encrypted.
+type TLSConfig struct {
+	CertFile string `yaml:"cert_file" mapstructure:"cert_file"` // Server certificate path
+	KeyFile  string `yaml:"key_file" mapstructure:"key_file"`   // Server key path
+	CAFile   string `yaml:"ca_file" mapstructure:"ca_file"`     // CA certificate for verification
+	AutoCert bool   `yaml:"auto_cert" mapstructure:"auto_cert"` // Auto-generate self-signed certs (default: true)
+	CertsDir string `yaml:"certs_dir" mapstructure:"certs_dir"` // Directory for auto-generated certs
 }
 
 // QuarantineConfig holds quarantine-related settings.
@@ -49,6 +62,12 @@ type QuarantineConfig struct {
 	Path             string `yaml:"path" mapstructure:"path"`
 	EnableEncryption bool   `yaml:"enable_encryption" mapstructure:"enable_encryption"`
 	EncryptionKey    string `yaml:"encryption_key" mapstructure:"encryption_key"`
+}
+
+// MonitorConfig holds file system monitoring settings.
+type MonitorConfig struct {
+	Paths       []string `yaml:"paths" mapstructure:"paths"`
+	ExcludeDirs []string `yaml:"exclude_dirs" mapstructure:"exclude_dirs"`
 }
 
 // ScannerConfig holds malware scanning settings.
@@ -138,13 +157,20 @@ func SetDefaultConfig(config *Config) {
 	config.Logging.MaxAge = 1
 	config.Logging.Compress = true
 
-	config.Monitor.Paths = []string{"/home", "/var/www"}
-	config.Monitor.ExcludeDirs = []string{"/proc", "/sys", "/dev"}
+	config.Server.Network = "unix"
+	config.Server.SocketPath = filepath.Join(config.App.BasePath, "lmd-ng.sock")
+	config.Server.Address = "127.0.0.1:7890"
+
+	config.Server.TLS.AutoCert = true
+	config.Server.TLS.CertsDir = filepath.Join(config.App.BasePath, "certs")
 
 	config.Quarantine.Enabled = true
 	config.Quarantine.Path = config.App.QuarantineDir
 	config.Quarantine.EnableEncryption = true
 	config.Quarantine.EncryptionKey = "CHANGE-THIS-TO-YOUR-SECRET-KEY"
+
+	config.Monitor.Paths = []string{"/home", "/var/www"}
+	config.Monitor.ExcludeDirs = []string{"/proc", "/sys", "/dev"}
 
 	config.Scanner.SignaturePath = config.App.SignaturesDir
 
@@ -208,6 +234,12 @@ func (c *Config) ResolvePaths() {
 	resolve(&c.App.LogsDir)
 
 	resolve(&c.Logging.FilePath)
+
+	resolve(&c.Server.SocketPath)
+	resolve(&c.Server.TLS.CertsDir)
+	resolve(&c.Server.TLS.CertFile)
+	resolve(&c.Server.TLS.KeyFile)
+	resolve(&c.Server.TLS.CAFile)
 
 	resolve(&c.Quarantine.Path)
 

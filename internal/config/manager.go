@@ -23,6 +23,7 @@ func executableDir() string {
 		if wdErr != nil {
 			return "."
 		}
+
 		return cwd
 	}
 
@@ -70,6 +71,9 @@ func NewConfigManager(configFilePath string) (*Manager, error) {
 	m.Config.App.LogsDir = filepath.Join(binDir, "logs")
 
 	m.Config.Logging.FilePath = filepath.Join(m.Config.App.LogsDir, "lmd-ng.log")
+
+	m.Config.Server.SocketPath = filepath.Join(binDir, "lmd-ng.sock")
+	m.Config.Server.TLS.CertsDir = filepath.Join(binDir, "certs")
 
 	m.Config.Quarantine.Path = m.Config.App.QuarantineDir
 	m.Config.Scanner.SignaturePath = m.Config.App.SignaturesDir

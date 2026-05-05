@@ -18,6 +18,24 @@ logging:
   max_age: 1
   compress: true
 
+server:
+  network: "unix"                    # "unix" (default) or "tcp"
+  socket_path: "./lmd-ng.sock"       # Unix socket path (used when network=unix)
+  address: "127.0.0.1:7890"          # TCP listen address (used when network=tcp)
+  tls:
+    # TLS is always enabled (no toggle) to prevent payload tampering
+    auto_cert: true                  # Auto-generate self-signed certs on any command
+    certs_dir: "./certs"             # Directory for auto-generated certificates
+    cert_file: ""                    # Server certificate (auto-generated if auto_cert=true)
+    key_file: ""                     # Server key
+    ca_file: ""                      # CA certificate for client verification
+
+quarantine:
+  enabled: true
+  path: "./quarantine"
+  enable_encryption: true
+  encryption_key: "CHANGE-THIS-TO-YOUR-SECRET-KEY"
+
 monitor:
   paths:
     - "/home"
@@ -26,12 +44,6 @@ monitor:
     - "/proc"
     - "/sys"
     - "/dev"
-
-quarantine:
-  enabled: true
-  path: "./quarantine"
-  enable_encryption: true
-  encryption_key: "CHANGE-THIS-TO-YOUR-SECRET-KEY"
 
 scanner:
   signature_path: "./sigs"
@@ -43,7 +55,7 @@ scanner:
   max_depth: 0
   hex_depth: 20000
   cpu_limit: 0
-  ignore_root: false
+  ignore_root: true
   ignore_users:
     - "root"
   ignore_groups:
@@ -77,6 +89,7 @@ notification:
     sender: "lmd-ng@example.com"
     recipients:
       - "admin@example.com"
+
   telegram:
     enabled: false
     bot_token: "YOUR-TELEGRAM-BOT-TOKEN"

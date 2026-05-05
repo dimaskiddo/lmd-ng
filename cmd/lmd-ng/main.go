@@ -13,6 +13,7 @@ import (
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
+	"github.com/dimaskiddo/lmd-ng/internal/protocol"
 	"github.com/dimaskiddo/lmd-ng/internal/syslimits"
 	"github.com/dimaskiddo/lmd-ng/internal/updater"
 )
@@ -95,10 +96,18 @@ func init() {
 				return fmt.Errorf("failed to create application directories: %w", err)
 			}
 
-			// For commands that need signatures (scan, daemon), force
+			// Auto-generate TLS certificates on any command invocation
+			// (including 'version') if they don't already exist.
+			if err := protocol.EnsureCerts(cfg); err != nil {
+				log.Warn("Failed to ensure TLS certificates", "error", err)
+				// Non-fatal: only DBS/RTP/scan commands strictly need certs
+			}
+
+			// For commands that need signatures (scan, daemon/dbs), force
 			// initial update if no signature databases exist yet.
+			// RTP doesn't own signatures — it delegates to DBS.
 			cmdName := cmd.Name()
-			if cmdName == "scan" || cmdName == "daemon" {
+			if cmdName == "scan" || cmdName == "daemon" || cmdName == "dbs" {
 				if !config.HasSignatures(cfg) {
 					log.Info("No signature databases found, performing initial update...")
 

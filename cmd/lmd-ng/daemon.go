@@ -2,19 +2,19 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
+	"github.com/dimaskiddo/lmd-ng/internal/dbs"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
-	"github.com/dimaskiddo/lmd-ng/internal/monitor"
 	"github.com/dimaskiddo/lmd-ng/internal/notifier"
+	"github.com/dimaskiddo/lmd-ng/internal/rtp"
 	"github.com/dimaskiddo/lmd-ng/internal/scanner"
 	"github.com/dimaskiddo/lmd-ng/internal/scheduler"
 	"github.com/dimaskiddo/lmd-ng/internal/updater"
@@ -41,89 +41,126 @@ func buildEngines(cfg *config.Config) ([]scanner.SignatureEngine, error) {
 	return engines, nil
 }
 
-// watchSignatures watches the signature directories for changes and triggers
-// engine reload. This allows manual `lmd-ng update` executions to signal the
-// running daemon to reload signatures.
-func watchSignatures(ctx context.Context, cfg *config.Config, coordinator *scanner.ScanCoordinator) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Error("Failed to create signature watcher", "error", err)
-		return
-	}
+func daemonCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "daemon",
+		Short: "LMD-NG Daemon Services",
+		Long: `Start LMD-NG daemon services.
 
-	// Ensure directories exist before watching
-	os.MkdirAll(cfg.App.SignaturesDir, 0755)
-	if err := watcher.Add(cfg.App.SignaturesDir); err != nil {
-		log.Warn("Failed to watch signatures directory", "path", cfg.App.SignaturesDir, "error", err)
-	}
+Without a subcommand, starts both DBS (Database Signature Service) and RTP
+(Real-Time Protector) in a single process for convenience.
 
-	if cfg.Scanner.ClamAVEnabled {
-		clamDBPath := cfg.Scanner.ClamAVDBPath
-		if clamDBPath == "" {
-			clamDBPath = cfg.App.ClamAVDir
-		}
+Subcommands:
+  dbs   Start only the Database Signature Service (server)
+  rtp   Start only the Real-Time Protector (client)`,
+		Run: func(cmd *cobra.Command, args []string) {
+			// No subcommand: run both DBS + RTP in single process
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
 
-		if clamDBPath != "" {
-			os.MkdirAll(clamDBPath, 0755)
-			if err := watcher.Add(clamDBPath); err != nil {
-				log.Warn("Failed to watch ClamAV DB directory", "path", clamDBPath, "error", err)
+			cfg := cfgMgr.GetConfig()
+
+			go cfgMgr.WatchConfig(ctx)
+
+			// --- Start DBS server in background ---
+			engines, err := buildEngines(cfg)
+			if err != nil {
+				log.Error("Failed to create signature engines", "error", err)
+				os.Exit(1)
 			}
-		}
+
+			server, err := dbs.NewServer(cfg, engines)
+			if err != nil {
+				log.Error("Failed to create DBS server", "error", err)
+				os.Exit(1)
+			}
+
+			server.EngineFactory = buildEngines
+
+			// Start update scheduler for DBS
+			updaterSvc := updater.NewUpdater(cfg)
+			updateSched, err := scheduler.NewUpdateScheduler(cfg, updaterSvc, server)
+			if err != nil {
+				log.Error("Failed to create update scheduler", "error", err)
+				os.Exit(1)
+			}
+
+			go updateSched.Start(ctx)
+
+			go func() {
+				if err := server.Serve(ctx); err != nil {
+					log.Error("DBS server error", "error", err)
+				}
+			}()
+
+			// Give DBS a moment to start listening
+			time.Sleep(500 * time.Millisecond)
+
+			// --- Start RTP client ---
+			var notifiers []notifier.Notifier
+			if cfg.Notification.Email.Enabled {
+				notifiers = append(notifiers, notifier.NewEmailNotifier(&cfg.Notification.Email))
+			}
+
+			if cfg.Notification.Telegram.Enabled {
+				notifiers = append(notifiers, notifier.NewTelegramNotifier(&cfg.Notification.Telegram))
+			}
+
+			multiNotifier := notifier.NewMultiNotifier(notifiers...)
+
+			rtpSvc, err := rtp.NewRTP(cfg, multiNotifier)
+			if err != nil {
+				log.Error("Failed to create RTP", "error", err)
+				os.Exit(1)
+			}
+
+			// Start scan scheduler for RTP
+			dbsClient, clientErr := dbs.NewClient(cfg)
+			if clientErr != nil {
+				log.Error("Failed to create DBS client for scan scheduler", "error", clientErr)
+				os.Exit(1)
+			}
+
+			scanSched, schedErr := scheduler.NewScanScheduler(cfg, dbsClient)
+			if schedErr != nil {
+				log.Error("Failed to create scan scheduler", "error", schedErr)
+				os.Exit(1)
+			}
+
+			go scanSched.Start(ctx)
+
+			go func() {
+				if err := rtpSvc.Start(ctx); err != nil && err != context.Canceled {
+					log.Error("RTP error", "error", err)
+				}
+			}()
+
+			log.Info("LMD-NG Daemon started (DBS + RTP)")
+			<-ctx.Done()
+
+			log.Info("LMD-NG Daemon shutting down...")
+			rtpSvc.Stop()
+			scanSched.Stop()
+			updateSched.Stop()
+			server.Shutdown()
+		},
 	}
 
-	go func() {
-		defer watcher.Close()
-		var reloadTimer *time.Timer
+	cmd.AddCommand(dbsCmd())
+	cmd.AddCommand(rtpCmd())
 
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-
-				// Look for file changes (Write, Rename, Create)
-				if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0 {
-					// Ignore temporary files created during download
-					if strings.Contains(event.Name, ".tmp") {
-						continue
-					}
-
-					// Debounce to avoid reloading multiple times for a single update
-					if reloadTimer != nil {
-						reloadTimer.Stop()
-					}
-
-					reloadTimer = time.AfterFunc(5*time.Second, func() {
-						log.Info("Signature updates detected on disk, reloading engines...")
-						if err := coordinator.ReloadEngines(); err != nil {
-							log.Error("Failed to reload signature engines", "error", err)
-						}
-					})
-				}
-
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-
-				log.Error("Signature watcher error", "error", err)
-
-			case <-ctx.Done():
-				if reloadTimer != nil {
-					reloadTimer.Stop()
-				}
-
-				return
-			}
-		}
-	}()
+	return cmd
 }
 
-func daemonCmd() *cobra.Command {
+func dbsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "daemon",
-		Short: "LMD-NG Resident Monitoring (Daemon)",
+		Use:   "dbs",
+		Short: "Start the Database Signature Service (server)",
+		Long: `Start the centralized Database Signature Service (DBS).
+
+DBS loads all malware signature databases into memory once and listens for scan
+requests from clients (RTP, on-demand scan) over an encrypted socket connection.
+Signature reload is triggered via socket command from 'lmd-ng update'.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
@@ -138,17 +175,56 @@ func daemonCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
-			walker, err := scanner.NewWalker(cfg)
+			server, err := dbs.NewServer(cfg, engines)
 			if err != nil {
-				log.Error("Failed to create scanner walker", "error", err)
+				log.Error("Failed to create DBS server", "error", err)
 				os.Exit(1)
 			}
 
-			coordinator := scanner.NewScanCoordinator(cfg, walker, engines)
+			server.EngineFactory = buildEngines
 
-			// Set the engine factory so the coordinator can rebuild engines
-			// when signatures are updated on disk.
-			coordinator.EngineFactory = buildEngines
+			// Start update scheduler
+			updaterSvc := updater.NewUpdater(cfg)
+			updateSched, err := scheduler.NewUpdateScheduler(cfg, updaterSvc, server)
+			if err != nil {
+				log.Error("Failed to create update scheduler", "error", err)
+				os.Exit(1)
+			}
+
+			go updateSched.Start(ctx)
+
+			go func() {
+				if err := server.Serve(ctx); err != nil {
+					log.Error("DBS server error", "error", err)
+				}
+			}()
+
+			log.Info("LMD-NG DBS (Database Signature Service) started")
+			<-ctx.Done()
+
+			log.Info("LMD-NG DBS shutting down...")
+			updateSched.Stop()
+			server.Shutdown()
+		},
+	}
+}
+
+func rtpCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rtp",
+		Short: "Start the Real-Time Protector (client)",
+		Long: `Start the Real-Time Protector (RTP) client service.
+
+RTP monitors file system events using fsnotify and streams modified files to the
+DBS server for signature matching. It handles quarantine locally. The DBS server
+must be running before starting RTP.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+
+			cfg := cfgMgr.GetConfig()
+
+			go cfgMgr.WatchConfig(ctx)
 
 			var notifiers []notifier.Notifier
 			if cfg.Notification.Email.Enabled {
@@ -161,37 +237,56 @@ func daemonCmd() *cobra.Command {
 
 			multiNotifier := notifier.NewMultiNotifier(notifiers...)
 
-			mon, err := monitor.NewMonitor(cfg, coordinator, multiNotifier)
+			rtpSvc, err := rtp.NewRTP(cfg, multiNotifier)
 			if err != nil {
-				log.Error("Failed to create monitor", "error", err)
+				log.Error("Failed to create RTP", "error", err)
 				os.Exit(1)
 			}
 
+			// Start scan scheduler
+			dbsClient, clientErr := dbs.NewClient(cfg)
+			if clientErr != nil {
+				log.Error("Failed to create DBS client for scan scheduler", "error", clientErr)
+				os.Exit(1)
+			}
+
+			scanSched, schedErr := scheduler.NewScanScheduler(cfg, dbsClient)
+			if schedErr != nil {
+				log.Error("Failed to create scan scheduler", "error", schedErr)
+				os.Exit(1)
+			}
+
+			go scanSched.Start(ctx)
+
 			go func() {
-				if err := mon.Start(ctx); err != nil && err != context.Canceled {
-					log.Error("Monitor error", "error", err)
+				if err := rtpSvc.Start(ctx); err != nil && err != context.Canceled {
+					log.Error("RTP error", "error", err)
 				}
 			}()
 
-			updaterSvc := updater.NewUpdater(cfg)
-
-			// Watch signature directories for changes (both internal and external updates)
-			watchSignatures(ctx, cfg, coordinator)
-
-			sched, err := scheduler.NewScheduler(cfg, coordinator, updaterSvc)
-			if err != nil {
-				log.Error("Failed to create scheduler", "error", err)
-				os.Exit(1)
-			}
-			sched.Start(ctx)
-
-			log.Info("LMD-NG Daemon started")
+			log.Info("LMD-NG RTP (Real-Time Protector) started")
 			<-ctx.Done()
 
-			log.Info("LMD-NG Daemon shutting down...")
-
-			mon.Stop()
-			sched.Stop()
+			log.Info("LMD-NG RTP shutting down...")
+			rtpSvc.Stop()
+			scanSched.Stop()
 		},
 	}
+}
+
+// sigReloader implements the scheduler.EngineReloader interface, delegating
+// reload calls to the DBS server. This is used by the update scheduler.
+type sigReloader struct {
+	server *dbs.Server
+}
+
+func (r *sigReloader) ReloadEngines() error {
+	return r.server.ReloadEngines()
+}
+
+// Verify sigReloader satisfies the interface at compile time.
+var _ fmt.Stringer = (*sigReloader)(nil)
+
+func (r *sigReloader) String() string {
+	return "DBS Server Engine Reloader"
 }
