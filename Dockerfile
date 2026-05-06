@@ -34,7 +34,7 @@ RUN go mod download \
 # Final Image
 # ---------------------------------------------------
 FROM dimaskiddo/alpine:base-glibc
-MAINTAINER Dimas Restu Hidayanto <dimas.restu@student.upi.edu>
+MAINTAINER Dimas Restu Hidayanto <drh.dimasrestu@gmail.com>
 
 ARG SERVICE_NAME="lmd-ng"
 
@@ -52,5 +52,8 @@ RUN apk --no-cache --update upgrade \
 
 COPY --from=go-builder /usr/src/app/main ./lmd-ng
 COPY --from=go-builder /usr/src/app/config.yaml.example ./config.yaml
+
+RUN sed -i -e '/- "\/var\/www"/d' ./config.yaml \
+    && sed -i -e 's/"\/home"/"\/data"/' ./config.yaml
 
 CMD ["lmd-ng", "daemon", "--config", "./config.yaml"]
