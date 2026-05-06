@@ -27,17 +27,17 @@ LMD-NG utilizes a **Client-Server Architecture** to maximize efficiency. A centr
 ```mermaid
 graph TD
     subgraph "DBS Server (Database Signature Service)"
-        DB[Signature Databases] --> Engine[Memory Loader]
-        Engine --> Matcher[Pattern Matcher]
+        DB["Signature Databases"] --> Engine["Memory Loader"]
+        Engine --> Matcher["Pattern Matcher"]
     end
 
     subgraph "Clients"
-        RTP[Real-Time Protector] -- Streamed Data --> Matcher
-        CLI[Scan CLI] -- Streamed Data --> Matcher
+        RTP["Real-Time Protector"] -- "Streamed Data" --> Matcher
+        CLI["Scan CLI"] -- "Streamed Data" --> Matcher
     end
 
-    Matcher -- Result --> Notifier[Email / Telegram]
-    Matcher -- Result --> Quarantine[Quarantine Manager]
+    Matcher -- "Result" --> Notifier["Email / Telegram"]
+    Matcher -- "Result" --> Quarantine["Quarantine Manager"]
 ```
 
 ---
