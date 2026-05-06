@@ -58,6 +58,13 @@ clean-dist:
 	rm -rf dist
 
 clean-build:
+	rm -rf logs
+	rm -rf certs
+	rm -rf quarantine
+	rm -rf clamav
+	rm -rf sigs
+	rm -f config.yaml
+	rm -f $(SERVICE_NAME).sock
 	rm -f $(SERVICE_NAME)
 
 clean:

@@ -217,9 +217,9 @@ func rtpCmd() *cobra.Command {
 		Short: "Start the Real-Time Protector (client)",
 		Long: `Start the Real-Time Protector (RTP) client service.
 
-RTP monitors file system events using fsnotify and streams modified files to the
-DBS server for signature matching. It handles quarantine locally. The DBS server
-must be running before starting RTP.`,
+RTP monitors file system events using fsnotify (kqueue) and streams modified
+files to the DBS server for signature matching. It handles quarantine locally.
+The DBS server must be running before starting RTP.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
