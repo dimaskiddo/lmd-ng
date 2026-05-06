@@ -184,7 +184,7 @@ func SetDefaultConfig(config *Config) {
 	config.Scanner.HexDepth = 20000
 	config.Scanner.CPULimit = 0
 
-	config.Scanner.IgnoreRoot = false
+	config.Scanner.IgnoreRoot = true
 	config.Scanner.IgnoreUsers = []string{"root"}
 	config.Scanner.IgnoreGroups = []string{"root"}
 

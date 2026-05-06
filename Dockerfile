@@ -27,8 +27,8 @@ RUN go mod download \
       CGO_ENABLED=0 \
       GOOS=linux \
       go build \
-      -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
-      -trimpath -a -o main ./cmd/lmd-ng
+        -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+        -trimpath -a -o main ./cmd/lmd-ng
 
 
 # Final Image
@@ -45,7 +45,10 @@ WORKDIR /usr/app/${SERVICE_NAME}
 RUN apk --no-cache --update upgrade \
   && mkdir -p \
       logs \
-      sigs
+      certs \
+      sigs \
+      clamav \
+      quarantine
 
 COPY --from=go-builder /usr/src/app/main ./lmd-ng
 COPY --from=go-builder /usr/src/app/config.yaml.example ./config.yaml
