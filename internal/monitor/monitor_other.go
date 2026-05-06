@@ -88,7 +88,7 @@ func (om *otherMonitor) addRecursive(path string) error {
 				log.Warn("Failed to add path to watcher, continuing", "path", absPath, "error", addErr)
 				return nil
 			}
-			log.Debug("Monitoring directory", "path", absPath)
+			log.Debug("Monitoring directory", "path", absPath, "backend", "fsnotify")
 		}
 
 		return nil
@@ -101,7 +101,8 @@ func (om *otherMonitor) handleEvent(ctx context.Context, name string, op fsnotif
 	info, statErr := os.Lstat(name)
 	if statErr == nil && info.IsDir() {
 		if op&fsnotify.Create != 0 {
-			log.Info("New directory created, adding to monitor", "path", name)
+			log.Info("New directory created, adding to monitor", "path", name, "backend", "fsnotify")
+
 			if err := om.addRecursive(name); err != nil {
 				log.Error("Failed to add new directory to monitor", "path", name, "error", err)
 			}
@@ -114,7 +115,7 @@ func (om *otherMonitor) handleEvent(ctx context.Context, name string, op fsnotif
 	}
 
 	if op&fsnotify.Create != 0 || op&fsnotify.Write != 0 || op&fsnotify.Rename != 0 {
-		log.Info("File system event detected, triggering scan", "file", name, "op", op.String())
+		log.Info("File system event detected, triggering scan", "file", name, "event", op.String())
 
 		results, quarantined := om.parent.scanFunc(ctx, name)
 		if quarantined && len(results) > 0 {
@@ -131,7 +132,7 @@ func (om *otherMonitor) handleEvent(ctx context.Context, name string, op fsnotif
 
 // Start begins monitoring using fsnotify.
 func (om *otherMonitor) Start(ctx context.Context) error {
-	log.Info("LMD-NG file system monitor started (fsnotify)", "watched_dirs", len(om.watcher.WatchList()))
+	log.Info("File system monitor started", "backend", "fsnotify", "watched_dirs", len(om.watcher.WatchList()))
 
 	for {
 		select {
@@ -148,7 +149,7 @@ func (om *otherMonitor) Start(ctx context.Context) error {
 			log.Error("FSNotify error", "error", err)
 
 		case <-ctx.Done():
-			log.Info("LMD-NG file system monitor stopped")
+			log.Info("File system monitor stopped", "backend", "fsnotify")
 			return om.watcher.Close()
 		}
 	}

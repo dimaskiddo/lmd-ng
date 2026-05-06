@@ -42,14 +42,25 @@ func newPlatformMonitor(m *Monitor) (monitorImpl, error) {
 			continue
 		}
 
+		// Pre-create a BUFFERED Events channel. The fsnotify/fsevents library
+		// creates an unbuffered channel by default in EventStream.Start() if
+		// Events is nil. The FSEvents callback runs on a GCD serial dispatch
+		// queue and performs a blocking send (es.Events <- events). If no
+		// goroutine is reading yet when the first callback fires (highly likely
+		// on busy directories like /private/tmp or /Users), the dispatch queue
+		// thread blocks permanently — no more events are ever delivered.
+		//
+		// By pre-creating a buffered channel, early callbacks can enqueue
+		// without blocking, giving the reader goroutine time to start.
 		es := &fsevents.EventStream{
 			Paths:   []string{path},
 			Latency: 200 * time.Millisecond,
 			Flags:   fsevents.FileEvents | fsevents.NoDefer,
+			Events:  make(chan []fsevents.Event, 8192),
 		}
 
 		dm.streams = append(dm.streams, es)
-		log.Info("Monitoring path (FSEvents)", "path", path)
+		log.Info("Monitoring path", "path", path, "backend", "fsevents")
 	}
 
 	if len(dm.streams) == 0 {
@@ -64,27 +75,28 @@ func (dm *darwinMonitor) isExcluded(eventPath string) bool {
 	cleanPath := filepath.Clean(eventPath)
 	for _, excluded := range dm.parent.cfg.Monitor.ExcludeDirs {
 		cleanExcluded := filepath.Clean(excluded)
+
 		if cleanPath == cleanExcluded || strings.HasPrefix(cleanPath, cleanExcluded+string(filepath.Separator)) {
 			return true
 		}
 	}
+
 	return false
 }
 
 // handleEvent processes a single FSEvents event.
 func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fsevents.EventFlags) {
-	log.Debug("FSEvents trace: received event", "path", path, "flags", fmt.Sprintf("0x%x", flags))
+	log.Debug("Monitor event received", "path", path, "flags", fmt.Sprintf("0x%x", flags))
 
 	// Skip directory events — we only scan files
 	info, statErr := os.Lstat(path)
 	if statErr == nil && info.IsDir() {
-		log.Debug("FSEvents trace: skipped directory", "path", path)
 		return
 	}
 
 	// Filter excluded paths
 	if dm.isExcluded(path) {
-		log.Debug("FSEvents trace: skipped excluded path", "path", path)
+		log.Debug("Monitor event skipped (excluded)", "path", path)
 		return
 	}
 
@@ -107,22 +119,16 @@ func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fse
 			}
 		}
 	} else {
-		log.Debug("FSEvents trace: skipped non-actionable flags", "path", path, "flags", fmt.Sprintf("0x%x", flags))
+		log.Debug("Monitor event skipped (non-actionable flags)", "path", path, "flags", fmt.Sprintf("0x%x", flags))
 	}
 }
 
-// Start begins monitoring using FSEvents. It starts all streams and multiplexes
-// their event channels into the processing loop.
+// Start begins monitoring using FSEvents. It starts reader goroutines FIRST,
+// then starts the streams to prevent dispatch queue deadlocks.
 func (dm *darwinMonitor) Start(ctx context.Context) error {
-	log.Info("LMD-NG file system monitor started (FSEvents)", "streams", len(dm.streams))
-
-	// Start all FSEvent streams
-	for _, es := range dm.streams {
-		es.Start()
-	}
-
-	// Multiplex all stream event channels
-	// We merge them into a single goroutine per stream
+	// Multiplex all stream event channels into a single merged channel.
+	// CRITICAL: set up readers BEFORE starting streams to prevent the GCD
+	// dispatch queue from blocking on the first callback.
 	merged := make(chan fsevents.Event, 4096)
 
 	for _, es := range dm.streams {
@@ -135,16 +141,26 @@ func (dm *darwinMonitor) Start(ctx context.Context) error {
 		}(es.Events)
 	}
 
+	// Now start all FSEvent streams — readers are already waiting.
+	for _, es := range dm.streams {
+		if err := es.Start(); err != nil {
+			log.Error("Failed to start FSEvents stream", "paths", es.Paths, "error", err)
+		}
+	}
+
+	log.Info("File system monitor started", "backend", "fsevents", "streams", len(dm.streams))
+
 	for {
 		select {
 		case ev := <-merged:
 			go dm.handleEvent(ctx, ev.Path, ev.Flags)
 
 		case <-ctx.Done():
-			log.Info("LMD-NG file system monitor stopped")
+			log.Info("File system monitor stopped", "backend", "fsevents")
 			for _, es := range dm.streams {
 				es.Stop()
 			}
+
 			return nil
 		}
 	}
@@ -155,5 +171,6 @@ func (dm *darwinMonitor) Stop() error {
 	for _, es := range dm.streams {
 		es.Stop()
 	}
+
 	return nil
 }

@@ -23,7 +23,7 @@ var (
 	cfgMgr  *config.Manager
 )
 
-func init() {
+func main() {
 	var err error
 
 	cfgMgr, err = config.NewConfigManager(cfgFile)
@@ -100,7 +100,6 @@ func init() {
 			// (including 'version') if they don't already exist.
 			if err := protocol.EnsureCerts(cfg); err != nil {
 				log.Warn("Failed to ensure TLS certificates", "error", err)
-				// Non-fatal: only DBS/RTP/scan commands strictly need certs
 			}
 
 			// For commands that need signatures (scan, daemon/dbs), force
@@ -141,8 +140,4 @@ func init() {
 		slog.Default().Error("CLI execution failed", "error", err)
 		os.Exit(1)
 	}
-}
-
-func main() {
-	// main is now empty as init() handles CLI execution
 }
