@@ -8,18 +8,18 @@ LMD-NG utilizes a **Client-Server Architecture** to maximize efficiency. A centr
 
 ## ✨ Why LMD-NG?
 
-*   **⚡ Client-Server Architecture:** Centralized signature matching via **DBS** (server) and **RTP** (client) reduces memory overhead across multiple monitored nodes.
-*   **📦 Native ClamAV Loader:** Built-in pure Go support for ClamAV databases (`.cvd`, `.cld`, `.ndb`, `.hdb`) with **zero** `libclamav` or `os/exec` dependencies.
+*   **⚡ Client-Server Architecture:** Centralized signature matching via **DBS** (server) while **RTP** and **On-Demand Scan** act as lightweight clients, reducing memory overhead across multiple nodes.
 *   **🕵️ Real-Time Protection:** Native file system monitoring—**FSEvents** on macOS (via CGO/Zig) and **fsnotify** on Linux/Windows—catches threats the moment they land.
-*   **🛠️ Zig CGO Toolchain:** Compiled with `CGO_ENABLED=1` using the **Zig compiler** as a cross-platform C/C++ frontend. Zig provides a self-contained toolchain that makes cross-compilation effortless and reproducible compared to standard GCC or Clang.
-*   **🔒 Secure Streaming:** Clients communicate with the DBS server over encrypted TLS or Unix domain sockets using a custom high-performance binary protocol.
-*   **🌍 Truly Cross-Platform:** Native support for **Linux**, **macOS**, and **Windows**. No legacy bash dependencies.
+*   **🔍 On-Demand Scanning:** Perform manual, high-performance scans of any directory. Like the RTP, the scan CLI acts as a DBS client to leverage centralized, in-memory signatures.
 *   **🔄 Intelligent Updates:** Automated signature updates with hot-reload support—the DBS server stays current without restarting active scans.
-*   **🚀 Auto-Tuned System Limits:** Automatically optimizes file descriptor limits to ensure smooth performance during heavy scans.
+*   **📦 Native ClamAV Loader:** Built-in pure Go support for ClamAV databases (`.cvd`, `.cld`, `.ndb`, `.hdb`) with **zero** `libclamav` or `os/exec` dependencies.
 *   **📥 Secure Quarantine:** Isolates threats with optional **AES-256 encryption** and full POSIX attribute preservation for safe restoration.
+*   **🔒 Secure Streaming:** Clients communicate with the DBS server over encrypted TLS or Unix domain sockets using a custom high-performance binary protocol.
 *   **📧 Multi-Channel Alerts:** Instant notifications via **Email (SMTP)** or **Telegram** when malware is detected.
 *   **📊 Structured Logging:** Clean, modern observability using Go's native `slog`.
-
+*   **🚀 Auto-Tuned System Limits:** Automatically optimizes file descriptor limits to ensure smooth performance during heavy scans.
+*   **🌍 Truly Cross-Platform:** Native support for **Linux**, **macOS**, and **Windows**. No legacy bash dependencies.
+*   **🛠️ Zig CGO Toolchain:** Compiled with `CGO_ENABLED=1` using the **Zig compiler** as a cross-platform C/C++ frontend. Zig provides a self-contained toolchain that makes cross-compilation effortless and reproducible compared to standard GCC or Clang.
 ---
 
 ## 🏗️ Architecture at a Glance
@@ -31,13 +31,13 @@ graph TD
         Engine --> Matcher["Pattern Matcher"]
     end
 
-    subgraph "Clients"
-        RTP["Real-Time Protector"] -- "Streamed Data" --> Matcher
-        CLI["Scan CLI"] -- "Streamed Data" --> Matcher
+    subgraph "Clients (RTP / Scan CLI)"
+        Source["File System Events / Path"] --> Streamer["Data Streamer"]
+        Streamer -- "Encrypted Stream" --> Matcher
+        Matcher -- "Detection Result" --> ActionHandler["Action Handler"]
+        ActionHandler --> Notifier["Email / Telegram"]
+        ActionHandler --> Quarantine["Quarantine Manager"]
     end
-
-    Matcher -- "Result" --> Notifier["Email / Telegram"]
-    Matcher -- "Result" --> Quarantine["Quarantine Manager"]
 ```
 
 ---
