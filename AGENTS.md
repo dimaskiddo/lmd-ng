@@ -33,7 +33,7 @@ You are equipped with the Obra/Superpowers framework and Andrej Karpathy guideli
 ### 2. Native OS Implementation (No OS CLI Wrappers)
 - LMD heavily relies on Linux binaries (`find`, `inotifywait`, `awk`, `sed`, `grep`). You must **NOT** use `os/exec` to call these tools.
 - **File Traversal:** Replace `find` with Go's `path/filepath` (e.g., `filepath.WalkDir`).
-- **File Monitoring:** Replace `inotifywait` with pure-Go cross-platform libraries (e.g., `github.com/fsnotify/fsnotify`).
+- **File Monitoring:** Replace `inotifywait` with `github.com/rjeczalik/notify`. You must utilize CGO with Zig's C Compiler to leverage File System Events (FSE) on macOS. This specifically resolves the open file limit / file descriptor limitations associated with KQueue on Unix/macOS.
 - **Signature Matching:** Implement internal malware signature matching using Go's native `crypto` and `regexp` packages. Focus strictly on LMD's native Hex/MD5 signatures for the core implementation.
 
 ### 3. Phased ClamAV Integration (Deferred)
