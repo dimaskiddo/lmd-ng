@@ -60,7 +60,7 @@ func (u *Updater) Update(ctx context.Context) error {
 
 	// Update LMD native signatures
 	if u.cfg.Updater.AutoUpdateSignatures {
-		log.Info("Checking for LMD signature updates...")
+		log.Info("Checking for LMD signature updates")
 
 		didUpdate, err := u.updateLMDSignatures(ctx)
 		if err != nil {
@@ -72,7 +72,7 @@ func (u *Updater) Update(ctx context.Context) error {
 
 	// Update ClamAV databases if both update and scanner are enabled
 	if u.cfg.Updater.ClamAVUpdateEnabled && u.cfg.Scanner.ClamAVEnabled {
-		log.Info("Checking for ClamAV database updates...")
+		log.Info("Checking for ClamAV database updates")
 
 		didUpdate, err := u.updateClamAV(ctx)
 		if err != nil {
@@ -84,7 +84,7 @@ func (u *Updater) Update(ctx context.Context) error {
 
 	// If any databases were updated, trigger the reload callback
 	if updated && u.OnSignaturesUpdated != nil {
-		log.Info("Signature databases updated, triggering engine reload...")
+		log.Info("Signature databases updated, triggering engine reload")
 		u.OnSignaturesUpdated()
 	}
 

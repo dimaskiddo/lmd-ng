@@ -63,6 +63,12 @@ For stop/uninstall: RTP is processed first, then DBS.`,
 			cfg := cfgMgr.GetConfig()
 			components := resolveComponents(args, true) // uninstall order: rtp first
 
+			// Auto-migrate: uninstall legacy monolithic service if it exists
+			if err := service.UninstallLegacyService(); err != nil {
+				// Non-fatal — legacy service may not exist
+				log.Debug("Legacy service migration check", "result", err)
+			}
+
 			for _, comp := range components {
 				if err := service.UninstallService(cfg, comp); err != nil {
 					handleServiceError(err, "uninstall", comp)

@@ -42,7 +42,7 @@ func scanCmd() *cobra.Command {
 				return
 			}
 
-			log.Info("Connected to DBS server, scanning via DBS")
+			log.Info("DBS server connected")
 			runDBSScan(ctx, dbsClient, scanPath)
 		},
 	}

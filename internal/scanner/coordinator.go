@@ -46,7 +46,7 @@ func (sc *ScanCoordinator) ReloadEngines() error {
 		return fmt.Errorf("engine factory not set, cannot reload engines")
 	}
 
-	log.Info("Reloading signature engines...")
+	log.Info("Reloading signature engines")
 
 	newEngines, err := sc.EngineFactory(sc.cfg)
 	if err != nil {

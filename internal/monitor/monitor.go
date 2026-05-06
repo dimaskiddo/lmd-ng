@@ -106,7 +106,7 @@ func (m *Monitor) Start(ctx context.Context) error {
 
 			// Only act on relevant file operations for now
 			// notify.Remove is useful for cleanup, but we only trigger scans on Create/Write/Rename
-			if event.Event() == notify.Create || event.Event() == notify.Write || event.Event() == notify.Rename {
+			if event.Event()&notify.Create != 0 || event.Event()&notify.Write != 0 || event.Event()&notify.Rename != 0 {
 				// Trigger a scan for the affected file
 				log.Info("File system event detected, triggering scan", "file", event.Path(), "op", event.Event().String())
 				go func(filePath string) {

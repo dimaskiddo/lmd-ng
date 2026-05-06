@@ -109,7 +109,7 @@ func init() {
 			cmdName := cmd.Name()
 			if cmdName == "scan" || cmdName == "daemon" || cmdName == "dbs" {
 				if !config.HasSignatures(cfg) {
-					log.Info("No signature databases found, performing initial update...")
+					log.Info("No signature databases found, performing initial update")
 
 					ctx, cancel := context.WithCancel(context.Background())
 					defer cancel()

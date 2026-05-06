@@ -113,7 +113,7 @@ func (c *Client) Ping(ctx context.Context) error {
 // WaitForServer blocks until the DBS server is reachable or the context is
 // cancelled. It retries Ping with exponential backoff.
 func (c *Client) WaitForServer(ctx context.Context) error {
-	log.Info("Waiting for DBS server to become available...", "address", c.address)
+	log.Info("Waiting for DBS server to become available", "address", c.address)
 
 	for i := 0; i < maxPingRetries; i++ {
 		select {
@@ -128,7 +128,7 @@ func (c *Client) WaitForServer(ctx context.Context) error {
 			return nil
 		}
 
-		log.Debug("DBS server not yet available, retrying...", "attempt", i+1, "max", maxPingRetries)
+		log.Debug("Retrying to connect DBS server", "attempt", i+1, "max", maxPingRetries)
 
 		select {
 		case <-ctx.Done():

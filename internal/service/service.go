@@ -111,7 +111,7 @@ func UninstallLegacyService() error {
 		return nil
 	}
 
-	log.Info("Legacy monolithic service detected, migrating...", "service", legacyServiceName, "status", status)
+	log.Info("Migrating legacy monolithic service", "service", legacyServiceName, "status", status)
 
 	// Stop the legacy service (best-effort)
 	_ = svc.Stop()

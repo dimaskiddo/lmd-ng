@@ -47,7 +47,7 @@ func NewServer(cfg *config.Config, engines []scanner.SignatureEngine) (*Server, 
 // Serve starts accepting client connections. It blocks until the context is
 // cancelled or the listener is closed. Active connections are allowed to drain.
 func (s *Server) Serve(ctx context.Context) error {
-	log.Info("DBS server started, waiting for connections...")
+	log.Info("DBS server started, waiting for connections")
 
 	go func() {
 		<-ctx.Done()
@@ -79,7 +79,7 @@ func (s *Server) Serve(ctx context.Context) error {
 
 // Shutdown closes the listener and waits for all active connections to finish.
 func (s *Server) Shutdown() {
-	log.Info("DBS server shutting down...")
+	log.Info("DBS server shutting down")
 
 	s.listener.Close()
 	s.wg.Wait()
@@ -99,7 +99,7 @@ func (s *Server) ReloadEngines() error {
 		return fmt.Errorf("engine factory not set, cannot reload engines")
 	}
 
-	log.Info("Reloading signature engines...")
+	log.Info("Reloading signature engines")
 
 	newEngines, err := s.EngineFactory(s.cfg)
 	if err != nil {
