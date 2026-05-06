@@ -64,12 +64,12 @@ var customLaunchdConfig = `<?xml version="1.0" encoding="UTF-8"?>
 	<key>SoftResourceLimits</key>
 	<dict>
 		<key>NumberOfFiles</key>
-		<integer>10485760</integer>
+		<integer>81920000</integer>
 	</dict>
 	<key>HardResourceLimits</key>
 	<dict>
 		<key>NumberOfFiles</key>
-		<integer>10485760</integer>
+		<integer>81920000</integer>
 	</dict>
 </dict>
 </plist>`

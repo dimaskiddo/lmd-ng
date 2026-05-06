@@ -36,7 +36,10 @@ func NewMonitor(cfg *config.Config, scanFunc ScanFunc, n notifier.Notifier) (*Mo
 		cfg:      cfg,
 		scanFunc: scanFunc,
 		notifier: n,
-		events:   make(chan notify.EventInfo, 1024), // Buffer to handle bursts of events
+		// Large buffer to prevent the notify library from silently dropping
+		// events via its non-blocking send. Watching broad trees like /Users
+		// on macOS generates a high volume of FSEvents.
+		events: make(chan notify.EventInfo, 81920000),
 	}
 
 	// Add initial paths to watch based on configuration
@@ -75,6 +78,52 @@ func (m *Monitor) AddPath(path string) error {
 	return notify.Watch(watchPath, m.events, notify.Create, notify.Write, notify.Rename, notify.Remove)
 }
 
+// isExcluded checks if a path falls under any of the configured exclude directories.
+func (m *Monitor) isExcluded(eventPath string) bool {
+	cleanPath := filepath.Clean(eventPath)
+	for _, excluded := range m.cfg.Monitor.ExcludeDirs {
+		cleanExcluded := filepath.Clean(excluded)
+		if cleanPath == cleanExcluded || strings.HasPrefix(cleanPath, cleanExcluded+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// handleEvent processes a single file system event. It runs in its own goroutine
+// so the main event loop can drain the channel as fast as possible, preventing
+// the notify library from dropping events via its non-blocking send.
+func (m *Monitor) handleEvent(ctx context.Context, eventPath string, eventType notify.Event) {
+	// Skip directory events — we only scan files
+	info, statErr := os.Lstat(eventPath)
+	if statErr == nil && info.IsDir() {
+		return
+	}
+
+	// Filter out events from excluded directories
+	if m.isExcluded(eventPath) {
+		log.Debug("Ignoring event in excluded directory", "path", eventPath)
+		return
+	}
+
+	// Trigger scan on Create, Write, or Rename events.
+	// Use bitwise AND to handle combined FSEvents flags (macOS batches flags).
+	if eventType&notify.Create != 0 || eventType&notify.Write != 0 || eventType&notify.Rename != 0 {
+		log.Info("File system event detected, triggering scan", "file", eventPath, "op", eventType.String())
+
+		results, quarantined := m.scanFunc(ctx, eventPath)
+		if quarantined && len(results) > 0 {
+			if m.notifier != nil {
+				go func() {
+					if err := m.notifier.SendQuarantineNotification(eventPath, results[0].SignatureName); err != nil {
+						log.Error("Failed to send quarantine notification", "error", err)
+					}
+				}()
+			}
+		}
+	}
+}
+
 // Start begins monitoring file system events.
 func (m *Monitor) Start(ctx context.Context) error {
 	log.Info("LMD-NG file system monitor started")
@@ -86,47 +135,11 @@ func (m *Monitor) Start(ctx context.Context) error {
 				return fmt.Errorf("notify event channel closed")
 			}
 
-			log.Debug("Notify event received", "event", event.Event().String(), "path", event.Path())
-
-			// Filter out events from excluded directories
-			isExcluded := false
-			cleanEventName := filepath.Clean(event.Path())
-			for _, excluded := range m.cfg.Monitor.ExcludeDirs {
-				cleanExcluded := filepath.Clean(excluded)
-				if cleanEventName == cleanExcluded || strings.HasPrefix(cleanEventName, cleanExcluded+string(filepath.Separator)) {
-					log.Debug("Ignoring event in excluded directory", "path", event.Path())
-					isExcluded = true
-					break
-				}
-			}
-
-			if isExcluded {
-				continue
-			}
-
-			// Only act on relevant file operations for now
-			// notify.Remove is useful for cleanup, but we only trigger scans on Create/Write/Rename
-			if event.Event()&notify.Create != 0 || event.Event()&notify.Write != 0 || event.Event()&notify.Rename != 0 {
-				// Trigger a scan for the affected file
-				log.Info("File system event detected, triggering scan", "file", event.Path(), "op", event.Event().String())
-				go func(filePath string) {
-					results, quarantined := m.scanFunc(ctx, filePath)
-					if quarantined && len(results) > 0 {
-						if m.notifier != nil {
-							// Fire and forget: send notification asynchronously
-							go func() {
-								if err := m.notifier.SendQuarantineNotification(filePath, results[0].SignatureName); err != nil {
-									log.Error("Failed to send quarantine notification", "error", err)
-								}
-							}()
-						}
-					}
-				}(event.Path()) // Run scan + quarantine in a goroutine
-			}
-
-			// Note: With rjeczalik/notify's recursive watch ("..."), we do NOT need to manually
-			// add new directories to the watcher when a Create event happens. The native
-			// FSEvents (macOS) and automated inotify trees (Linux) handle it automatically.
+			// Dispatch all slow work (Lstat, exclude check, scan) into a
+			// goroutine immediately so this loop drains the channel as fast as
+			// possible. The notify library uses a non-blocking send and will
+			// silently drop events if the channel is full.
+			go m.handleEvent(ctx, event.Path(), event.Event())
 
 		case <-ctx.Done():
 			log.Info("LMD-NG file system monitor stopped")
