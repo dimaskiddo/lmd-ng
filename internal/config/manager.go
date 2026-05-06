@@ -1,12 +1,10 @@
 package config
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
 	"github.com/dimaskiddo/lmd-ng/internal/log"
@@ -40,17 +38,15 @@ func executableDir() string {
 
 // Manager handles loading, parsing, and watching configuration.
 type Manager struct {
-	Viper            *viper.Viper
-	Config           *Config
-	ConfigChangeChan chan struct{}
+	Viper  *viper.Viper
+	Config *Config
 }
 
 // NewConfigManager creates a new configuration manager.
 func NewConfigManager(configFilePath string) (*Manager, error) {
 	m := &Manager{
-		Viper:            viper.New(),
-		Config:           &Config{},
-		ConfigChangeChan: make(chan struct{}, 1),
+		Viper:  viper.New(),
+		Config: &Config{},
 	}
 
 	// Resolve the binary's own directory first; all relative defaults are
@@ -152,69 +148,55 @@ func NewConfigManager(configFilePath string) (*Manager, error) {
 	return m, nil
 }
 
-// WatchConfig watches for configuration file changes and hot-reloads.
-func (m *Manager) WatchConfig(ctx context.Context) {
-	m.Viper.OnConfigChange(func(e fsnotify.Event) {
-		// Create a new Config struct to unmarshal into, to avoid issues with concurrent map writes
-		newConfig := &Config{}
+// ReloadConfig reloads the configuration from disk.
+func (m *Manager) ReloadConfig() error {
+	if err := m.Viper.ReadInConfig(); err != nil {
+		return fmt.Errorf("failed to reload config: %w", err)
+	}
 
-		// Set default values for the new config
-		SetDefaultConfig(newConfig)
+	newConfig := &Config{}
+	SetDefaultConfig(newConfig)
 
-		if err := m.Viper.Unmarshal(newConfig); err != nil {
-			return
-		}
+	if err := m.Viper.Unmarshal(newConfig); err != nil {
+		return fmt.Errorf("failed to unmarshal reloaded config: %w", err)
+	}
 
-		// Update the manager's config with the new one
-		m.Config = newConfig
+	m.Config = newConfig
 
-		// Resolve absolute paths for application directories again,
-		// anchoring relative paths to the binary directory rather than CWD.
-		if !filepath.IsAbs(m.Config.App.BasePath) {
-			m.Config.App.BasePath = filepath.Join(executableDir(), m.Config.App.BasePath)
-		}
+	if !filepath.IsAbs(m.Config.App.BasePath) {
+		m.Config.App.BasePath = filepath.Join(executableDir(), m.Config.App.BasePath)
+	}
 
-		// Ensure all paths in the configuration are absolute
-		m.Config.ResolvePaths()
+	m.Config.ResolvePaths()
 
-		// Add app data directories to exclude list to prevent recursive monitoring loops
-		appDirs := []string{
-			m.Config.App.SignaturesDir,
-			m.Config.App.ClamAVDir,
-			m.Config.App.QuarantineDir,
-			filepath.Dir(m.Config.Logging.FilePath),
-		}
+	appDirs := []string{
+		m.Config.App.SignaturesDir,
+		m.Config.App.ClamAVDir,
+		m.Config.App.QuarantineDir,
+		filepath.Dir(m.Config.Logging.FilePath),
+	}
 
-		for _, dir := range appDirs {
-			if dir != "" {
-				absDir, err := filepath.Abs(dir)
-				if err == nil {
-					// Avoid duplicates
-					exists := false
-					for _, e := range m.Config.Monitor.ExcludeDirs {
-						if e == absDir {
-							exists = true
-							break
-						}
+	for _, dir := range appDirs {
+		if dir != "" {
+			absDir, err := filepath.Abs(dir)
+			if err == nil {
+				exists := false
+				for _, e := range m.Config.Monitor.ExcludeDirs {
+					if e == absDir {
+						exists = true
+						break
 					}
+				}
 
-					if !exists {
-						m.Config.Monitor.ExcludeDirs = append(m.Config.Monitor.ExcludeDirs, absDir)
-					}
+				if !exists {
+					m.Config.Monitor.ExcludeDirs = append(m.Config.Monitor.ExcludeDirs, absDir)
 				}
 			}
 		}
+	}
 
-		// Notify listeners about config change
-		select {
-		case m.ConfigChangeChan <- struct{}{}:
-		default:
-		}
-	})
-
-	m.Viper.WatchConfig()
-
-	<-ctx.Done()
+	log.Info("Configuration reloaded successfully")
+	return nil
 }
 
 // GetConfig returns the current configuration.

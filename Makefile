@@ -29,18 +29,21 @@ release:
 	make vendor
 	make clean-dist
 	goreleaser release --parallelism 1 --rm-dist --snapshot --skip-publish
+	rm -f ./*.o
 	echo "Release '$(SERVICE_NAME)' complete, please check dist directory."
 
 publish:
 	make vendor
 	make clean-dist
 	GITHUB_TOKEN=$(GITHUB_TOKEN) goreleaser release --parallelism 1 --rm-dist
+	rm -f ./*.o
 	echo "Publish '$(SERVICE_NAME)' complete, please check your repository releases."
 
 build:
 	make vendor
 	make init-dist
-	CC="./hack/zcc.sh" CXX="./hack/zcxx.sh" CGO_ENABLED=$(BUILD_CGO_ENABLED) go build -ldflags="-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -trimpath -a -o dist/$(SERVICE_NAME) ./cmd/lmd-ng
+	CC="\"$(PWD)/hack/zcc.sh\"" CXX="\"$(PWD)/hack/zcxx.sh\"" CGO_ENABLED=$(BUILD_CGO_ENABLED) go build -ldflags="-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -trimpath -a -o dist/$(SERVICE_NAME) ./cmd/lmd-ng
+	rm -f ./*.o
 	echo "Build '$(SERVICE_NAME)' complete."
 
 docker-build:
@@ -61,6 +64,7 @@ clean:
 	make clean-dist
 	make clean-build
 	rm -rf vendor
+	rm -f ./*.o
 
 commit:
 	make vendor

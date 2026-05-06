@@ -60,7 +60,7 @@ Subcommands:
 
 			cfg := cfgMgr.GetConfig()
 
-			go cfgMgr.WatchConfig(ctx)
+			go handleConfigReload(ctx)
 
 			// --- Start DBS server in background ---
 			engines, err := buildEngines(cfg)
@@ -139,6 +139,7 @@ Subcommands:
 			<-ctx.Done()
 
 			log.Info("LMD-NG Daemon shutting down...")
+
 			rtpSvc.Stop()
 			scanSched.Stop()
 			updateSched.Stop()
@@ -167,7 +168,7 @@ Signature reload is triggered via socket command from 'lmd-ng update'.`,
 
 			cfg := cfgMgr.GetConfig()
 
-			go cfgMgr.WatchConfig(ctx)
+			go handleConfigReload(ctx)
 
 			engines, err := buildEngines(cfg)
 			if err != nil {
@@ -203,6 +204,7 @@ Signature reload is triggered via socket command from 'lmd-ng update'.`,
 			<-ctx.Done()
 
 			log.Info("LMD-NG DBS shutting down...")
+
 			updateSched.Stop()
 			server.Shutdown()
 		},
@@ -224,7 +226,7 @@ must be running before starting RTP.`,
 
 			cfg := cfgMgr.GetConfig()
 
-			go cfgMgr.WatchConfig(ctx)
+			go handleConfigReload(ctx)
 
 			var notifiers []notifier.Notifier
 			if cfg.Notification.Email.Enabled {
@@ -268,6 +270,7 @@ must be running before starting RTP.`,
 			<-ctx.Done()
 
 			log.Info("LMD-NG RTP shutting down...")
+
 			rtpSvc.Stop()
 			scanSched.Stop()
 		},
@@ -289,4 +292,22 @@ var _ fmt.Stringer = (*sigReloader)(nil)
 
 func (r *sigReloader) String() string {
 	return "DBS Server Engine Reloader"
+}
+
+func handleConfigReload(ctx context.Context) {
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+
+	for {
+		select {
+		case <-hup:
+			log.Info("Received SIGHUP, reloading configuration...")
+			if err := cfgMgr.ReloadConfig(); err != nil {
+				log.Error("Failed to reload configuration", "error", err)
+			}
+
+		case <-ctx.Done():
+			return
+		}
+	}
 }

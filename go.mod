@@ -3,9 +3,9 @@ module github.com/dimaskiddo/lmd-ng
 go 1.25.5
 
 require (
-	github.com/fsnotify/fsnotify v1.9.0
 	github.com/kardianos/service v1.2.4
 	github.com/natefinch/lumberjack v2.0.0+incompatible
+	github.com/rjeczalik/notify v0.9.3
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
@@ -15,6 +15,7 @@ require (
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
+	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect

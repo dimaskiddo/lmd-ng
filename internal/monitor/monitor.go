@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/fsnotify/fsnotify"
+	"github.com/rjeczalik/notify"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
@@ -24,33 +24,24 @@ type ScanFunc func(ctx context.Context, filePath string) ([]*scanner.ScanResult,
 // Monitor monitors file system events and triggers scans.
 type Monitor struct {
 	cfg      *config.Config
-	watcher  *fsnotify.Watcher
 	scanFunc ScanFunc
 	notifier notifier.Notifier
-	events   chan fsnotify.Event
-	errors   chan error
+	events   chan notify.EventInfo
 }
 
 // NewMonitor creates and initializes a new file system monitor.
 // The scanFunc callback is invoked for each file event that requires scanning.
 func NewMonitor(cfg *config.Config, scanFunc ScanFunc, n notifier.Notifier) (*Monitor, error) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create fsnotify watcher: %w", err)
-	}
-
 	m := &Monitor{
 		cfg:      cfg,
-		watcher:  watcher,
 		scanFunc: scanFunc,
 		notifier: n,
-		events:   make(chan fsnotify.Event),
-		errors:   make(chan error),
+		events:   make(chan notify.EventInfo, 1024), // Buffer to handle bursts of events
 	}
 
 	// Add initial paths to watch based on configuration
 	for _, path := range cfg.Monitor.Paths {
-		if err := m.AddRecursive(path); err != nil {
+		if err := m.AddPath(path); err != nil {
 			log.Error("Failed to add path to monitor", "path", path, "error", err)
 		}
 	}
@@ -58,58 +49,30 @@ func NewMonitor(cfg *config.Config, scanFunc ScanFunc, n notifier.Notifier) (*Mo
 	return m, nil
 }
 
-// AddRecursive adds a path and all its subdirectories to the file system watcher.
-func (m *Monitor) AddRecursive(path string) error {
+// AddPath adds a path to the file system watcher. If the path is a directory,
+// it uses notify's recursive watcher pattern ("...").
+func (m *Monitor) AddPath(path string) error {
 	// Evaluate symlinks so we can watch the actual directory
 	if evalPath, err := filepath.EvalSymlinks(path); err == nil {
 		path = evalPath
 	}
 
-	return filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			// Log permission errors but continue walking
-			if os.IsPermission(err) {
-				log.Warn("Permission denied when accessing path", "path", p, "error", err)
-				return filepath.SkipDir
-			}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("failed to stat path %s: %w", path, err)
+	}
 
-			log.Error("Error walking path", "path", p, "error", err)
-			return err
-		}
+	var watchPath string
+	if info.IsDir() {
+		watchPath = filepath.Join(path, "...")
+	} else {
+		watchPath = path
+	}
 
-		// Check for excluded directories
-		cleanP := filepath.Clean(p)
-		for _, excluded := range m.cfg.Monitor.ExcludeDirs {
-			cleanExcluded := filepath.Clean(excluded)
-			if cleanP == cleanExcluded || strings.HasPrefix(cleanP, cleanExcluded+string(filepath.Separator)) {
-				log.Debug("Excluding path from monitoring", "path", p)
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
+	log.Info("Monitoring path", "path", watchPath)
 
-				return nil
-			}
-		}
-
-		if d.IsDir() {
-			absPath, err := filepath.Abs(p)
-			if err != nil {
-				log.Error("Failed to get absolute path", "path", p, "error", err)
-				return err
-			}
-
-			if err := m.watcher.Add(absPath); err != nil {
-				// Log the error but continue walking. fsnotify (especially kqueue on macOS)
-				// may fail to add a directory if it contains a broken symlink.
-				log.Warn("Failed to add path to watcher (continuing)", "path", absPath, "error", err)
-				return nil
-			}
-
-			log.Info("Monitoring directory", "path", absPath)
-		}
-
-		return nil
-	})
+	// Watch for Create, Write, Rename, and Remove events
+	return notify.Watch(watchPath, m.events, notify.Create, notify.Write, notify.Rename, notify.Remove)
 }
 
 // Start begins monitoring file system events.
@@ -118,20 +81,20 @@ func (m *Monitor) Start(ctx context.Context) error {
 
 	for {
 		select {
-		case event, ok := <-m.watcher.Events:
+		case event, ok := <-m.events:
 			if !ok {
-				return fmt.Errorf("fsnotify event channel closed")
+				return fmt.Errorf("notify event channel closed")
 			}
 
-			log.Debug("FSNotify event received", "event", event.String())
+			log.Debug("Notify event received", "event", event.Event().String(), "path", event.Path())
 
 			// Filter out events from excluded directories
 			isExcluded := false
-			cleanEventName := filepath.Clean(event.Name)
+			cleanEventName := filepath.Clean(event.Path())
 			for _, excluded := range m.cfg.Monitor.ExcludeDirs {
 				cleanExcluded := filepath.Clean(excluded)
 				if cleanEventName == cleanExcluded || strings.HasPrefix(cleanEventName, cleanExcluded+string(filepath.Separator)) {
-					log.Debug("Ignoring event in excluded directory", "path", event.Name)
+					log.Debug("Ignoring event in excluded directory", "path", event.Path())
 					isExcluded = true
 					break
 				}
@@ -142,11 +105,10 @@ func (m *Monitor) Start(ctx context.Context) error {
 			}
 
 			// Only act on relevant file operations for now
-			if event.Op&fsnotify.Create == fsnotify.Create ||
-				event.Op&fsnotify.Write == fsnotify.Write ||
-				event.Op&fsnotify.Rename == fsnotify.Rename {
+			// notify.Remove is useful for cleanup, but we only trigger scans on Create/Write/Rename
+			if event.Event() == notify.Create || event.Event() == notify.Write || event.Event() == notify.Rename {
 				// Trigger a scan for the affected file
-				log.Info("File system event detected, triggering scan", "file", event.Name, "op", event.Op.String())
+				log.Info("File system event detected, triggering scan", "file", event.Path(), "op", event.Event().String())
 				go func(filePath string) {
 					results, quarantined := m.scanFunc(ctx, filePath)
 					if quarantined && len(results) > 0 {
@@ -159,33 +121,23 @@ func (m *Monitor) Start(ctx context.Context) error {
 							}()
 						}
 					}
-				}(event.Name) // Run scan + quarantine in a goroutine
+				}(event.Path()) // Run scan + quarantine in a goroutine
 			}
 
-			// If a directory is created, add it to the watcher recursively
-			if event.Op&fsnotify.Create == fsnotify.Create {
-				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					log.Info("New directory created, adding to monitor", "path", event.Name)
-					if err := m.AddRecursive(event.Name); err != nil {
-						log.Error("Failed to add new directory to monitor", "path", event.Name, "error", err)
-					}
-				}
-			}
-
-		case err, ok := <-m.watcher.Errors:
-			if !ok {
-				return fmt.Errorf("fsnotify error channel closed")
-			}
-			log.Error("FSNotify error", "error", err)
+			// Note: With rjeczalik/notify's recursive watch ("..."), we do NOT need to manually
+			// add new directories to the watcher when a Create event happens. The native
+			// FSEvents (macOS) and automated inotify trees (Linux) handle it automatically.
 
 		case <-ctx.Done():
 			log.Info("LMD-NG file system monitor stopped")
-			return m.watcher.Close()
+			notify.Stop(m.events)
+			return nil
 		}
 	}
 }
 
 // Stop stops the file system monitor.
 func (m *Monitor) Stop() error {
-	return m.watcher.Close()
+	notify.Stop(m.events)
+	return nil
 }

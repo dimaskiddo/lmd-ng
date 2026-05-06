@@ -4,8 +4,8 @@ before:
 builds:
   - main: ./cmd/lmd-ng
     env:
-      - CC="./hack/zcc.sh"
-      - CXX="./hack/zcxx.sh"
+      - CC="{{ .Env.PWD }}/hack/zcc.sh"
+      - CXX="{{ .Env.PWD }}/hack/zcxx.sh"
       - CGO_ENABLED=1
     ldflags:
       - -s
