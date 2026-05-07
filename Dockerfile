@@ -24,7 +24,7 @@ RUN go mod download \
     && ZIG_LIBC=musl \
         CC="/usr/src/app/hack/zcc.sh" \
         CXX="/usr/src/app/hack/zcxx.sh" \
-        CGO_ENABLED=0 \
+        CGO_ENABLED=1 \
         GOOS=linux \
         go build \
           -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
