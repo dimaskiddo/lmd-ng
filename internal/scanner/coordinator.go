@@ -14,60 +14,63 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/quarantine"
 )
 
-// ScanCoordinator orchestrates file system traversal and signature scanning.
-type ScanCoordinator struct {
-	cfg           *config.Config
-	walker        *Walker
-	engines       []SignatureEngine
-	enginesMu     sync.RWMutex
-	quarantineMgr quarantine.Manager
+// ScanDataWithEngines runs all provided signature engines against the given
+// seekable reader. It is the single source of truth for the engine-scan loop.
+// Callers are responsible for logging detections with their own context prefix.
+// Returns matched results and any fatal error.
+func ScanDataWithEngines(ctx context.Context, engines []SignatureEngine, r io.ReadSeeker, filePath string) ([]*ScanResult, error) {
+	var results []*ScanResult
 
-	// EngineFactory is called during ReloadEngines to reconstruct the
-	// signature engine list. It is set by the daemon at wiring time.
-	EngineFactory func(cfg *config.Config) ([]SignatureEngine, error)
+	for _, engine := range engines {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+
+		default:
+		}
+
+		// Rewind reader for each engine so every engine starts from byte 0
+		if _, err := r.Seek(0, io.SeekStart); err != nil {
+			return nil, fmt.Errorf("failed to seek reader to start for engine %s: %w", engine.Name(), err)
+		}
+
+		res, err := engine.Scan(ctx, r, filePath)
+		if err != nil {
+			log.Error("Signature engine failed to scan", "engine", engine.Name(), "filepath", filePath, "error", err)
+			continue
+		}
+
+		if len(res) > 0 {
+			results = append(results, res...)
+			// Stop scanning with remaining engines once malware is detected.
+			// One positive detection is sufficient to trigger quarantine.
+			break
+		}
+	}
+
+	return results, nil
+}
+
+// ScanCoordinator orchestrates file system traversal and signature scanning.
+// Used by the local fallback scan path (when DBS server is not available).
+type ScanCoordinator struct {
+	cfg       *config.Config
+	walker    *Walker
+	engines   []SignatureEngine
+	enginesMu sync.RWMutex
 }
 
 // NewScanCoordinator creates a new ScanCoordinator.
 func NewScanCoordinator(cfg *config.Config, walker *Walker, engines []SignatureEngine) *ScanCoordinator {
 	return &ScanCoordinator{
-		cfg:           cfg,
-		walker:        walker,
-		engines:       engines,
-		quarantineMgr: quarantine.NewQuarantineManager(&cfg.Quarantine),
+		cfg:     cfg,
+		walker:  walker,
+		engines: engines,
 	}
-}
-
-// ReloadEngines re-creates all signature engines from their database files.
-// This is safe to call while scans are running — active scans will continue
-// using the old engine set until they finish, while new scans will pick up
-// the freshly loaded engines.
-func (sc *ScanCoordinator) ReloadEngines() error {
-	if sc.EngineFactory == nil {
-		return fmt.Errorf("engine factory not set, cannot reload engines")
-	}
-
-	log.Info("Reloading signature engines")
-
-	newEngines, err := sc.EngineFactory(sc.cfg)
-	if err != nil {
-		return fmt.Errorf("failed to create new signature engines during reload: %w", err)
-	}
-
-	sc.enginesMu.Lock()
-	sc.engines = newEngines
-	sc.enginesMu.Unlock()
-
-	engineNames := make([]string, len(newEngines))
-	for i, e := range newEngines {
-		engineNames[i] = e.Name()
-	}
-
-	log.Info("Signature engines reloaded successfully", "engines", engineNames)
-	return nil
 }
 
 // getEngines returns a snapshot of the current engine list, safe for use
-// during a scan even if a reload happens concurrently.
+// during a scan even if engines are swapped concurrently.
 func (sc *ScanCoordinator) getEngines() []SignatureEngine {
 	sc.enginesMu.RLock()
 	defer sc.enginesMu.RUnlock()
@@ -79,8 +82,9 @@ func (sc *ScanCoordinator) getEngines() []SignatureEngine {
 	return engines
 }
 
-// StartScan begins a malware scan of the specified root path.
-func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string) ([]*ScanResult, error) {
+// StartScan begins a malware scan of the specified root path. If a
+// quarantine.Manager is provided, detected files are quarantined immediately.
+func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string, qMgr quarantine.Manager) ([]*ScanResult, error) {
 	log.Info("Starting scan", "path", rootPath)
 	var allResults []*ScanResult
 
@@ -139,11 +143,11 @@ func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string) ([]*S
 					return
 				}
 
-				// If quarantine is enabled, quarantine the file (once per file)
-				if sc.cfg.Quarantine.Enabled {
+				// If quarantine manager provided and quarantine enabled, quarantine file
+				if qMgr != nil && sc.cfg.Quarantine.Enabled {
 					log.Info("Threat detected, quarantining file", "file", filePath, "detections", len(fileResults))
 
-					_, qErr := sc.quarantineMgr.Quarantine(childCtx, filePath, fileResults[0].SignatureName, fileResults[0].SignatureType)
+					_, qErr := qMgr.Quarantine(childCtx, filePath, fileResults[0].SignatureName, fileResults[0].SignatureType)
 					if qErr != nil {
 						log.Error("Failed to quarantine file", "file", filePath, "error", qErr)
 					}
@@ -188,42 +192,12 @@ func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string) ([]*S
 	return allResults, nil
 }
 
-// ScanFileAndAct scans a single file and immediately takes action (quarantine)
-// if malware is detected. This is intended for real-time monitor use where
-// detected threats must be handled immediately rather than collected into a
-// batch result set.
-func (sc *ScanCoordinator) ScanFileAndAct(ctx context.Context, filePath string) ([]*ScanResult, bool) {
-	fileResults, err := sc.ScanFile(ctx, filePath)
-	if err != nil {
-		log.Error("Failed to scan file", "filepath", filePath, "error", err)
-		return nil, false
-	}
-
-	if len(fileResults) == 0 {
-		return nil, false
-	}
-
-	quarantined := false
-
-	// If quarantine is enabled, quarantine the file immediately
-	if sc.cfg.Quarantine.Enabled {
-		log.Info("Threat detected, quarantining file", "file", filePath, "detections", len(fileResults))
-
-		_, qErr := sc.quarantineMgr.Quarantine(ctx, filePath, fileResults[0].SignatureName, fileResults[0].SignatureType)
-		if qErr != nil {
-			log.Error("Failed to quarantine file", "file", filePath, "error", qErr)
-		} else {
-			quarantined = true
-		}
-	}
-
-	return fileResults, quarantined
-}
-
-// ScanFile opens a file and passes its content to all registered signature engines.
+// ScanFile opens a file and passes its content to all registered signature
+// engines via ScanDataWithEngines. Logs detections as MALWARE DETECTED (LOCAL).
 func (sc *ScanCoordinator) ScanFile(ctx context.Context, filePath string) ([]*ScanResult, error) {
-	// Stat the file first to skip directories and non-regular files
-	info, err := os.Lstat(filePath)
+	// Stat the file first to skip directories and non-regular files.
+	// Use os.Stat (not Lstat) to follow symlinks and resolve Docker volume mounts.
+	info, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Debug("File no longer exists, skipping scan", "filepath", filePath)
@@ -254,42 +228,18 @@ func (sc *ScanCoordinator) ScanFile(ctx context.Context, filePath string) ([]*Sc
 	}
 	defer file.Close()
 
-	var fileResults []*ScanResult
-
-	// Snapshot the engine list so a concurrent reload doesn't affect this scan
+	// Snapshot the engine list so a concurrent swap doesn't affect this scan
 	engines := sc.getEngines()
 
-	for _, engine := range engines {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		// Resetting the file offset for each engine to ensure each engine starts from the beginning
-		_, err = file.Seek(0, io.SeekStart)
-		if err != nil {
-			return nil, fmt.Errorf("failed to seek file to start for engine %s: %w", engine.Name(), err)
-		}
-
-		res, err := engine.Scan(ctx, file, filePath)
-		if err != nil {
-			log.Error("Signature engine failed to scan file", "engine", engine.Name(), "filepath", filePath, "error", err)
-			continue
-		}
-
-		if len(res) > 0 {
-			fileResults = append(fileResults, res...)
-			// Stop scanning with remaining engines once malware is detected.
-			// One positive detection is sufficient to trigger quarantine.
-			break
-		}
+	fileResults, err := ScanDataWithEngines(ctx, engines, file, filePath)
+	if err != nil {
+		return nil, err
 	}
 
-	// Log if any malware hits were found for the file
+	// Log detections with LOCAL prefix for local fallback scan path
 	if len(fileResults) > 0 {
 		for _, r := range fileResults {
-			log.Info("MALWARE DETECTED",
+			log.Info("MALWARE DETECTED (LOCAL)",
 				"file", r.FilePath,
 				"signature", r.SignatureName,
 				"type", r.SignatureType,

@@ -56,11 +56,9 @@ scanner:
   max_depth: 0
   hex_depth: 20000
   cpu_limit: 0
-  ignore_root: true
-  ignore_users:
-    - "root"
-  ignore_groups:
-    - "root"
+  ignore_root: false
+  ignore_users: []
+  ignore_groups: []
   include_regex: ""
   exclude_regex: ""
 

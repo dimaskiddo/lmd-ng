@@ -42,7 +42,7 @@ publish:
 build:
 	make vendor
 	make init-dist
-	CC="\"$(PWD)/hack/zcc.sh\"" CXX="\"$(PWD)/hack/zcxx.sh\"" CGO_ENABLED=$(BUILD_CGO_ENABLED) go build -ldflags="-s -w -linkmode external -extldflags '-static' -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -trimpath -a -o dist/$(SERVICE_NAME) ./cmd/lmd-ng
+	CC="\"$(PWD)/hack/zcc.sh\"" CXX="\"$(PWD)/hack/zcxx.sh\"" CGO_ENABLED=$(BUILD_CGO_ENABLED) go build -ldflags="-s -w -linkmode external -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -trimpath -a -o dist/$(SERVICE_NAME) ./cmd/lmd-ng
 	rm -f ./*.o
 	echo "Build '$(SERVICE_NAME)' complete."
 

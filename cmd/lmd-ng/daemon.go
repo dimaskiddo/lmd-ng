@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -277,22 +276,6 @@ quarantine locally. The DBS server must be running before starting RTP.`,
 	}
 }
 
-// sigReloader implements the scheduler.EngineReloader interface, delegating
-// reload calls to the DBS server. This is used by the update scheduler.
-type sigReloader struct {
-	server *dbs.Server
-}
-
-func (r *sigReloader) ReloadEngines() error {
-	return r.server.ReloadEngines()
-}
-
-// Verify sigReloader satisfies the interface at compile time.
-var _ fmt.Stringer = (*sigReloader)(nil)
-
-func (r *sigReloader) String() string {
-	return "DBS Server Engine Reloader"
-}
 
 func handleConfigReload(ctx context.Context) {
 	hup := make(chan os.Signal, 1)

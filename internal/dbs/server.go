@@ -258,35 +258,13 @@ ScanPhase:
 		seekableReader = bytes.NewReader(memoryBuffer.Bytes())
 	}
 
-	// Run signature engines on the seekable reader
+	// Run signature engines on the seekable reader via shared scan function
 	engines := s.getEngines()
-	var allResults []*scanner.ScanResult
-
-	for _, engine := range engines {
-		if _, err := seekableReader.Seek(0, io.SeekStart); err != nil {
-			log.Error("Failed to rewind reader for engine", "engine", engine.Name(), "error", err)
-			continue
-		}
-
-		select {
-		case <-ctx.Done():
-			s.sendError(conn, "server shutting down")
-			return
-
-		default:
-		}
-
-		results, scanErr := engine.Scan(ctx, seekableReader, req.FilePath)
-		if scanErr != nil {
-			log.Error("Engine scan failed", "engine", engine.Name(), "file", req.FilePath, "error", scanErr)
-			continue
-		}
-
-		if len(results) > 0 {
-			allResults = append(allResults, results...)
-			// Stop on first detection — one positive is sufficient
-			break
-		}
+	allResults, scanErr := scanner.ScanDataWithEngines(ctx, engines, seekableReader, req.FilePath)
+	if scanErr != nil {
+		log.Error("Scan failed", "file", req.FilePath, "error", scanErr)
+		s.sendError(conn, fmt.Sprintf("scan failed: %v", scanErr))
+		return
 	}
 
 	// Build and send the result message
@@ -310,7 +288,7 @@ ScanPhase:
 
 	if len(allResults) > 0 {
 		for _, r := range allResults {
-			log.Info("MALWARE DETECTED (via DBS)",
+			log.Info("MALWARE DETECTED (DBS)",
 				"file", r.FilePath,
 				"signature", r.SignatureName,
 				"type", r.SignatureType,

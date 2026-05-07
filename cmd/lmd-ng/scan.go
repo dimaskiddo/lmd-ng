@@ -115,6 +115,7 @@ func runLocalScan(ctx context.Context, scanPath string) {
 		log.Error("Failed to create LMD signature scanner", "error", err)
 		os.Exit(1)
 	}
+
 	engines := []scanner.SignatureEngine{lmdScanner}
 
 	// Add ClamAV engine if enabled
@@ -124,6 +125,7 @@ func runLocalScan(ctx context.Context, scanPath string) {
 			log.Error("Failed to create ClamAV signature engine", "error", clamErr)
 			os.Exit(1)
 		}
+
 		engines = append(engines, clamEngine)
 	}
 
@@ -133,15 +135,18 @@ func runLocalScan(ctx context.Context, scanPath string) {
 		os.Exit(1)
 	}
 
+	// Create quarantine manager for local scan quarantine support
+	qMgr := quarantine.NewQuarantineManager(&cfg.Quarantine)
+
 	coordinator := scanner.NewScanCoordinator(cfg, walker, engines)
-	results, err := coordinator.StartScan(ctx, scanPath)
+	results, err := coordinator.StartScan(ctx, scanPath, qMgr)
 	if err != nil {
 		log.Error("On-Demand scan failed", "error", err)
 		os.Exit(1)
 	}
 
 	if len(results) > 0 {
-		log.Info("On-Demand scan completed with detections (local fallback)", "total_hits", len(results))
+		log.Info("On-Demand scan completed with detections", "total_hits", len(results))
 	} else {
 		log.Info("On-Demand scan completed, no threats detected.")
 	}

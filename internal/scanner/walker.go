@@ -82,9 +82,9 @@ func (w *Walker) Walk(ctx context.Context, root string, fn func(path string, inf
 		return fmt.Errorf("failed to stat scan target %s: %w", root, err)
 	}
 
-	// If root is a regular file, scan it directly (skip directory traversal)
-	if rootInfo.Mode().IsRegular() {
-		return w.scanSingleFile(ctx, root, rootInfo, fn)
+	// If root is a regular file, apply filters and scan it directly
+	if rootInfo.Mode().IsRegular() || rootInfo.Mode()&fs.ModeSymlink != 0 {
+		return w.ApplyFilters(ctx, root, rootInfo, fn)
 	}
 
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -137,50 +137,7 @@ func (w *Walker) Walk(ctx context.Context, root string, fn func(path string, inf
 			return nil
 		}
 
-		// If it is a symlink, resolve it to get its true type and size
-		if info.Mode()&fs.ModeSymlink != 0 {
-			targetInfo, err := os.Stat(path)
-			if err != nil {
-				log.Debug("Failed to stat symlink target", "path", path, "error", err)
-				return nil
-			}
-			info = targetInfo
-		}
-
-		// If it's not a regular file, skip it (e.g., devices, sockets, or symlinks to directories)
-		if !info.Mode().IsRegular() {
-			log.Debug("Skipping non-regular file", "path", path, "mode", info.Mode())
-			return nil
-		}
-
-		// Apply file size filters
-		if info.Size() < w.cfg.Scanner.MinFilesize {
-			log.Debug("Skipping file due to min_filesize", "path", path, "size", info.Size(), "min_filesize", w.cfg.Scanner.MinFilesize)
-			return nil
-		}
-
-		if w.parsedMaxFilesize > 0 && info.Size() > w.parsedMaxFilesize {
-			log.Debug("Skipping file due to max_filesize", "path", path, "size", info.Size(), "max_filesize", w.cfg.Scanner.MaxFilesize)
-			return nil
-		}
-
-		// Apply ignore_root, ignore_user, ignore_group filters (Unix only; no-op on Windows)
-		if applyOwnerFilters(path, info, w.cfg) {
-			return nil
-		}
-
-		// Apply regex filters
-		if w.excludeRegex != nil && w.excludeRegex.MatchString(path) {
-			log.Debug("Skipping file due to exclude_regex", "path", path, "regex", w.cfg.Scanner.ExcludeRegex)
-			return nil
-		}
-
-		if w.includeRegex != nil && !w.includeRegex.MatchString(path) {
-			log.Debug("Skipping file due to include_regex mismatch", "path", path, "regex", w.cfg.Scanner.IncludeRegex)
-			return nil
-		}
-
-		return fn(path, info)
+		return w.ApplyFilters(ctx, path, info, fn)
 	})
 }
 
@@ -200,13 +157,30 @@ func getPathDepth(root, path string) (int, error) {
 	return strings.Count(relPath, string(filepath.Separator)), nil
 }
 
-// scanSingleFile handles scanning a single file target, applying all configured
-// filters (filesize, user/group ignore, regex) before calling the scan callback.
-func (w *Walker) scanSingleFile(ctx context.Context, path string, info os.FileInfo, fn func(string, os.FileInfo) error) error {
+// ApplyFilters handles scanning a single file target, applying all configured
+// filters (filesize, user/group ignore, regex, and symlink resolution) before
+// calling the scan callback.
+func (w *Walker) ApplyFilters(ctx context.Context, path string, info os.FileInfo, fn func(string, os.FileInfo) error) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
+	}
+
+	// If it is a symlink, resolve it to get its true type and size
+	if info.Mode()&fs.ModeSymlink != 0 {
+		targetInfo, err := os.Stat(path)
+		if err != nil {
+			log.Debug("Failed to stat symlink target", "path", path, "error", err)
+			return nil
+		}
+		info = targetInfo
+	}
+
+	// If it's not a regular file, skip it (e.g., devices, sockets, or symlinks to directories)
+	if !info.Mode().IsRegular() {
+		log.Debug("Skipping non-regular file", "path", path, "mode", info.Mode())
+		return nil
 	}
 
 	// Apply file size filters

@@ -170,8 +170,8 @@ func (c *Client) WaitForServer(ctx context.Context) error {
 // the scan results. The file is read in chunks and streamed over the TLS
 // connection — neither client nor server buffers the full file in memory.
 func (c *Client) ScanFile(ctx context.Context, filePath string) ([]*scanner.ScanResult, error) {
-	// Stat the file first
-	info, err := os.Lstat(filePath)
+	// Stat the file first (follow symlinks)
+	info, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Debug("File no longer exists, skipping scan", "filepath", filePath)

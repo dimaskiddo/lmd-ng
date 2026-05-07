@@ -30,7 +30,7 @@ RUN go mod download \
         CGO_ENABLED=1 \
         GOOS=linux \
         go build \
-          -ldflags="-s -w -linkmode external -extldflags '-static' -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+          -ldflags="-s -w -linkmode external -X main.version=${VERSION} -X main.commit=${COMMIT}" \
           -trimpath -a -o main ./cmd/lmd-ng
 
 

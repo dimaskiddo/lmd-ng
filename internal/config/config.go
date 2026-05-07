@@ -192,9 +192,9 @@ func SetDefaultConfig(config *Config) {
 	config.Scanner.CPULimit = 0
 	config.Scanner.ConcurrencyLimit = 192
 
-	config.Scanner.IgnoreRoot = true
-	config.Scanner.IgnoreUsers = []string{"root"}
-	config.Scanner.IgnoreGroups = []string{"root"}
+	config.Scanner.IgnoreRoot = false
+	config.Scanner.IgnoreUsers = []string{}
+	config.Scanner.IgnoreGroups = []string{}
 
 	config.Scanner.IncludeRegex = ""
 	config.Scanner.ExcludeRegex = ""

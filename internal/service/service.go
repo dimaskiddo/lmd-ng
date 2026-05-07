@@ -65,11 +65,6 @@ func displayName(comp Component) string {
 	}
 }
 
-// AllComponents returns all components in install/start order (DBS first, then RTP).
-func AllComponents() []Component {
-	return []Component{ComponentDBS, ComponentRTP}
-}
-
 // buildServiceConfig constructs the kardianos/service Config for a specific component.
 func buildServiceConfig(exePath string, comp Component) *kservice.Config {
 	cfg := &kservice.Config{

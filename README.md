@@ -178,6 +178,12 @@ go test ./...
 
 ---
 
+## ⚠️ Disclaimer
+
+**DO WITH YOUR OWN RISK (DWYOR)**. This software is provided "as is", without warranty of any kind, express or implied. Use of this software may involve risks, including but not limited to system instability or data loss. The authors are not responsible for any damage caused by the use of this application.
+
+---
+
 ## ⚖️ License
 
 Distributed under the **MIT License**. See `LICENSE` for more information.

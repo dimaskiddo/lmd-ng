@@ -26,6 +26,7 @@ type RTP struct {
 	monitor       *monitor.Monitor
 	notifier      notifier.Notifier
 	quarantineMgr quarantine.Manager
+	walker        *scanner.Walker
 	recentScans   sync.Map
 }
 
@@ -38,6 +39,11 @@ func NewRTP(cfg *config.Config, n notifier.Notifier) (*RTP, error) {
 		return nil, fmt.Errorf("failed to create DBS client: %w", err)
 	}
 
+	walker, err := scanner.NewWalker(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create walker for RTP: %w", err)
+	}
+
 	qMgr := quarantine.NewQuarantineManager(&cfg.Quarantine)
 
 	rtp := &RTP{
@@ -45,6 +51,7 @@ func NewRTP(cfg *config.Config, n notifier.Notifier) (*RTP, error) {
 		dbsClient:     dbsClient,
 		notifier:      n,
 		quarantineMgr: qMgr,
+		walker:        walker,
 	}
 
 	// Create the monitor with a scan callback that uses the DBS client.
@@ -123,9 +130,28 @@ func (r *RTP) scanAndAct(ctx context.Context, filePath string) ([]*scanner.ScanR
 
 	r.recentScans.Store(filePath, time.Now())
 
-	results, err := r.dbsClient.ScanFile(ctx, filePath)
+	// Use Walker.ApplyFilters to respect all scanner-level exclusions
+	// (ignore_root, max_filesize, regex, etc.).
+	info, err := os.Lstat(filePath)
 	if err != nil {
-		log.Error("Failed to scan file via DBS", "filepath", filePath, "error", err)
+		if os.IsNotExist(err) {
+			log.Debug("File no longer exists, skipping real-time scan", "file", filePath)
+		} else {
+			log.Warn("Failed to stat file for real-time scan", "file", filePath, "error", err)
+		}
+
+		return nil, false
+	}
+
+	var results []*scanner.ScanResult
+	filterErr := r.walker.ApplyFilters(ctx, filePath, info, func(path string, info os.FileInfo) error {
+		res, scanErr := r.dbsClient.ScanFile(ctx, path)
+		results = res
+		return scanErr
+	})
+
+	if filterErr != nil {
+		log.Error("Failed to scan file via DBS", "filepath", filePath, "error", filterErr)
 		return nil, false
 	}
 
