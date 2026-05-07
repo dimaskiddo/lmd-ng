@@ -1,6 +1,7 @@
 package dbs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/log"
 	"github.com/dimaskiddo/lmd-ng/internal/protocol"
 	"github.com/dimaskiddo/lmd-ng/internal/scanner"
+	"github.com/dimaskiddo/lmd-ng/internal/util"
 )
 
 // Server is the centralized Database Signature Service. It loads signature
@@ -174,55 +176,101 @@ func (s *Server) handleScanRequest(ctx context.Context, conn net.Conn, requestPa
 
 	log.Debug("Scan request received", "file", req.FilePath, "size", req.FileSize)
 
-	// Create a pipe: the receiver goroutine writes chunks into the pipe,
-	// the scanner reads from the pipe. Neither side buffers the full file.
-	pr, pw := io.Pipe()
+	// Buffer Once Mechanism:
+	// We read the entire incoming stream into a seekable buffer before passing it
+	// to the signature engines. This allows multiple engines to scan the same
+	// data stream without the first engine consuming the pipe.
+	var memoryBuffer *bytes.Buffer
+	var tempFile *os.File
+	var useTempFile bool
 
-	// Goroutine to receive chunks from the client and write them to the pipe
-	receiveDone := make(chan error, 1)
-	go func() {
-		defer pw.Close()
+	bufferLimit, err := util.ParseSizeString(s.cfg.Server.StreamBufferLimit)
+	if err != nil || bufferLimit <= 0 {
+		bufferLimit = 10 * 1024 * 1024 // Default to 10MB if invalid or empty
+	}
 
-		for {
-			msgType, chunk, readErr := protocol.ReadFrame(conn)
-			if readErr != nil {
-				receiveDone <- fmt.Errorf("failed to read chunk: %w", readErr)
-				return
-			}
+	if req.FileSize > bufferLimit {
+		useTempFile = true
+		tempFile, err = os.CreateTemp("", "lmd-scan-*")
+		if err != nil {
+			log.Error("Failed to create temp file for scan", "error", err)
+			s.sendError(conn, "internal server error: temp file creation failed")
+			return
+		}
+		defer func() {
+			tempFile.Close()
+			os.Remove(tempFile.Name())
+		}()
+	} else {
+		memoryBuffer = &bytes.Buffer{}
+		if req.FileSize > 0 {
+			memoryBuffer.Grow(int(req.FileSize))
+		}
+	}
 
-			switch msgType {
-			case protocol.MsgScanChunk:
-				if _, writeErr := pw.Write(chunk); writeErr != nil {
-					receiveDone <- fmt.Errorf("failed to write chunk to pipe: %w", writeErr)
+	for {
+		msgType, chunk, readErr := protocol.ReadFrame(conn)
+		if readErr != nil {
+			log.Error("Failed to read chunk", "error", readErr)
+			s.sendError(conn, "failed to read stream")
+			return
+		}
+
+		switch msgType {
+		case protocol.MsgScanChunk:
+			if useTempFile {
+				if _, writeErr := tempFile.Write(chunk); writeErr != nil {
+					log.Error("Failed to write to temp file", "error", writeErr)
+					s.sendError(conn, "internal server error: write failed")
 					return
 				}
-
-			case protocol.MsgScanEnd:
-				receiveDone <- nil
-				return
-
-			default:
-				receiveDone <- fmt.Errorf("unexpected message type during scan: %d", msgType)
-				return
+			} else {
+				memoryBuffer.Write(chunk)
 			}
-		}
-	}()
 
-	// Run signature engines on the pipe reader
+		case protocol.MsgScanEnd:
+			// Stream received completely, break out of loop
+			goto ScanPhase
+
+		default:
+			log.Error("Unexpected message type during scan", "type", msgType)
+			s.sendError(conn, "unexpected message type")
+			return
+		}
+	}
+
+ScanPhase:
+	var seekableReader io.ReadSeeker
+	if useTempFile {
+		if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
+			log.Error("Failed to seek temp file", "error", err)
+			s.sendError(conn, "internal server error: seek failed")
+			return
+		}
+		seekableReader = tempFile
+	} else {
+		seekableReader = bytes.NewReader(memoryBuffer.Bytes())
+	}
+
+	// Run signature engines on the seekable reader
 	engines := s.getEngines()
 	var allResults []*scanner.ScanResult
 
 	for _, engine := range engines {
+		if _, err := seekableReader.Seek(0, io.SeekStart); err != nil {
+			log.Error("Failed to rewind reader for engine", "engine", engine.Name(), "error", err)
+			continue
+		}
+
 		select {
 		case <-ctx.Done():
-			pr.Close()
 			s.sendError(conn, "server shutting down")
 			return
 
 		default:
 		}
 
-		results, scanErr := engine.Scan(ctx, pr, req.FilePath)
+		results, scanErr := engine.Scan(ctx, seekableReader, req.FilePath)
 		if scanErr != nil {
 			log.Error("Engine scan failed", "engine", engine.Name(), "file", req.FilePath, "error", scanErr)
 			continue
@@ -233,12 +281,6 @@ func (s *Server) handleScanRequest(ctx context.Context, conn net.Conn, requestPa
 			// Stop on first detection — one positive is sufficient
 			break
 		}
-	}
-
-	// Wait for the receiver goroutine to complete
-	if recvErr := <-receiveDone; recvErr != nil {
-		log.Error("Chunk receiver error", "file", req.FilePath, "error", recvErr)
-		// Still try to send whatever results we have
 	}
 
 	// Build and send the result message

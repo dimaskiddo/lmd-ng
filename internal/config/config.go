@@ -40,10 +40,11 @@ type LoggingConfig struct {
 
 // ServerConfig holds DBS server/client connection configuration.
 type ServerConfig struct {
-	Network    string    `yaml:"network" mapstructure:"network"`         // "unix" or "tcp" (default: "unix")
-	SocketPath string    `yaml:"socket_path" mapstructure:"socket_path"` // Unix socket path
-	Address    string    `yaml:"address" mapstructure:"address"`         // TCP listen address
-	TLS        TLSConfig `yaml:"tls" mapstructure:"tls"`
+	Network           string    `yaml:"network" mapstructure:"network"`                         // "unix" or "tcp" (default: "unix")
+	SocketPath        string    `yaml:"socket_path" mapstructure:"socket_path"`                 // Unix socket path
+	Address           string    `yaml:"address" mapstructure:"address"`                         // TCP listen address
+	StreamBufferLimit string    `yaml:"stream_buffer_limit" mapstructure:"stream_buffer_limit"` // Limit for RAM buffering before falling back to disk temp files (e.g., "10M")
+	TLS               TLSConfig `yaml:"tls" mapstructure:"tls"`
 }
 
 // TLSConfig holds mutual TLS settings. TLS is always enabled — there is no
@@ -160,6 +161,7 @@ func SetDefaultConfig(config *Config) {
 	config.Server.Network = "unix"
 	config.Server.SocketPath = filepath.Join(config.App.BasePath, "lmd-ng.sock")
 	config.Server.Address = "127.0.0.1:7890"
+	config.Server.StreamBufferLimit = "10M"
 
 	config.Server.TLS.AutoCert = true
 	config.Server.TLS.CertsDir = filepath.Join(config.App.BasePath, "certs")

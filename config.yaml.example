@@ -22,6 +22,7 @@ server:
   network: "unix"                    # "unix" (default) or "tcp"
   socket_path: "./lmd-ng.sock"       # Unix socket path (used when network=unix)
   address: "127.0.0.1:7890"          # TCP listen address (used when network=tcp)
+  stream_buffer_limit: "10M"
   tls:
     # TLS is always enabled (no toggle) to prevent payload tampering
     auto_cert: true                  # Auto-generate self-signed certs on any command

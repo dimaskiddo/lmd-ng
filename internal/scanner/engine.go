@@ -1,7 +1,6 @@
 package scanner
 
 import (
-	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/sha1"
@@ -30,8 +29,8 @@ type ScanResult struct {
 // SignatureEngine defines the contract for malware signature matching engines.
 type SignatureEngine interface {
 	// Scan processes the provided reader and returns all detected malware matches.
-	// It should not close the reader. The reader might be a limited view of the file.
-	Scan(ctx context.Context, r io.Reader, filePath string) ([]*ScanResult, error)
+	// It should not close the reader. The reader must be a seekable stream.
+	Scan(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error)
 	// Name returns the name of the signature engine.
 	Name() string
 }
@@ -79,39 +78,14 @@ func NewLMDSignatureScanner(cfg *config.Config) (*LMDSignatureScanner, error) {
 }
 
 // Scan implements the SignatureEngine interface for LMDSignatureScanner.
-func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.Reader, filePath string) ([]*ScanResult, error) {
-	var dataReader *bytes.Reader
-
-	file, ok := r.(*os.File)
-	if !ok {
-		log.Warn("Scanner received non-seekable reader, falling back to memory read for efficiency compromises.", "filepath", filePath)
-
-		data, err := io.ReadAll(r)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read all data from non-seekable reader: %w", err)
-		}
-
-		dataReader = bytes.NewReader(data)
-		r = dataReader
-
-		file = nil
-	}
-
+func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error) {
 	// --- Hash Scanning (MD5 + SHA256) ---
 	md5Hasher := md5.New()
 	sha256Hasher := sha256.New()
 	multiWriter := io.MultiWriter(md5Hasher, sha256Hasher)
 
-	if file != nil {
-		_, err := file.Seek(0, io.SeekStart)
-		if err != nil {
-			return nil, fmt.Errorf("failed to seek file to start for hash: %w", err)
-		}
-	} else if dataReader != nil {
-		_, err := dataReader.Seek(0, io.SeekStart)
-		if err != nil {
-			return nil, fmt.Errorf("failed to seek memory reader to start for hash: %w", err)
-		}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("failed to seek reader to start for hash: %w", err)
 	}
 
 	_, err := io.Copy(multiWriter, r)
@@ -143,13 +117,17 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.Reader, filePath st
 	// --- Native ClamAV Scanning for RFXN ---
 	if s.clamavScanner != nil && s.clamavScanner.TotalSignatures() > 0 {
 		var fileSize int64 = -1
-		if file != nil {
-			info, err := file.Stat()
-			if err == nil {
+
+		// Attempt to get file size for hash lookups if it's an os.File
+		if file, ok := r.(*os.File); ok {
+			if info, err := file.Stat(); err == nil {
 				fileSize = info.Size()
 			}
-		} else if dataReader != nil {
-			fileSize = int64(dataReader.Len())
+		} else {
+			// For generic ReadSeeker, determine size by seeking
+			if size, err := r.Seek(0, io.SeekEnd); err == nil {
+				fileSize = size
+			}
 		}
 
 		if entry, found := s.clamavScanner.HDB.LookupMD5(md5Hash, fileSize); found {
@@ -171,23 +149,8 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.Reader, filePath st
 		}
 
 		if s.clamavScanner.NDB.TotalCount() > 0 {
-			if file != nil {
-				_, err := file.Seek(0, io.SeekStart)
-				if err != nil {
-					return nil, fmt.Errorf("failed to seek file to start for RFXN NDB scan: %w", err)
-				}
-			} else if dataReader != nil {
-				_, err := dataReader.Seek(0, io.SeekStart)
-				if err != nil {
-					return nil, fmt.Errorf("failed to seek memory reader to start for RFXN NDB scan: %w", err)
-				}
-			}
-
-			var ndbReader io.Reader = r
-			if file != nil {
-				ndbReader = file
-			} else if dataReader != nil {
-				ndbReader = dataReader
+			if _, err := r.Seek(0, io.SeekStart); err != nil {
+				return nil, fmt.Errorf("failed to seek reader to start for RFXN NDB scan: %w", err)
 			}
 
 			// Read content up to configured hex depth for body pattern matching
@@ -196,7 +159,7 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.Reader, filePath st
 				hexDepth = 65536
 			}
 
-			limitedReader := io.LimitReader(ndbReader, hexDepth)
+			limitedReader := io.LimitReader(r, hexDepth)
 			content, err := io.ReadAll(limitedReader)
 			if err != nil && err != io.EOF {
 				return nil, fmt.Errorf("failed to read content for RFXN NDB scan: %w", err)
@@ -216,22 +179,11 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.Reader, filePath st
 	}
 
 	// --- HEX Scanning ---
-	var hexReadCloser io.ReadCloser
-	if file != nil {
-		_, err := file.Seek(0, io.SeekStart)
-		if err != nil {
-			return nil, fmt.Errorf("failed to seek file to start for HEX scan: %w", err)
-		}
-
-		hexReadCloser = io.NopCloser(io.LimitReader(file, int64(s.cfg.Scanner.HexDepth)))
-	} else if dataReader != nil {
-		_, err := dataReader.Seek(0, io.SeekStart)
-		if err != nil {
-			return nil, fmt.Errorf("failed to seek memory reader to start for HEX scan: %w", err)
-		}
-
-		hexReadCloser = io.NopCloser(io.LimitReader(dataReader, int64(s.cfg.Scanner.HexDepth)))
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("failed to seek reader to start for HEX scan: %w", err)
 	}
+
+	hexReadCloser := io.NopCloser(io.LimitReader(r, int64(s.cfg.Scanner.HexDepth)))
 
 	hexContent, err := io.ReadAll(hexReadCloser)
 	if err != nil && err != io.EOF {
@@ -302,54 +254,24 @@ func NewClamAVSignatureEngine(cfg *config.Config) (*ClamAVSignatureEngine, error
 //     and checks against HDB/HSB signatures.
 //  2. Body-based detection: Reads file content up to the configured hex depth
 //     and matches against NDB body signatures.
-func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.Reader, filePath string) ([]*ScanResult, error) {
+func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error) {
 	var results []*ScanResult
-
-	// Obtain a seekable reader. If r is an *os.File we can seek; otherwise buffer it.
-	var dataReader *bytes.Reader
-	file, isFile := r.(*os.File)
-	if !isFile {
-		data, err := io.ReadAll(r)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read data for ClamAV scan: %w", err)
-		}
-
-		dataReader = bytes.NewReader(data)
-	}
-
-	// Helper to seek to start
-	seekToStart := func() error {
-		if isFile {
-			_, err := file.Seek(0, io.SeekStart)
-			return err
-		}
-
-		_, err := dataReader.Seek(0, io.SeekStart)
-		return err
-	}
-
-	// Helper to get reader
-	getReader := func() io.Reader {
-		if isFile {
-			return file
-		}
-
-		return dataReader
-	}
 
 	// Determine file size for hash lookups
 	var fileSize int64 = -1
-	if isFile {
-		info, err := file.Stat()
-		if err == nil {
+	if file, ok := r.(*os.File); ok {
+		if info, err := file.Stat(); err == nil {
 			fileSize = info.Size()
 		}
 	} else {
-		fileSize = int64(dataReader.Len())
+		// Determine size by seeking
+		if size, err := r.Seek(0, io.SeekEnd); err == nil {
+			fileSize = size
+		}
 	}
 
 	// --- Phase 1: Hash-based detection (MD5 + SHA1 + SHA256 in one pass) ---
-	if err := seekToStart(); err != nil {
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("failed to seek to start for hash computation: %w", err)
 	}
 
@@ -358,7 +280,7 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.Reader, filePath 
 	sha256Hasher := sha256.New()
 	multiHashWriter := io.MultiWriter(md5Hasher, sha1Hasher, sha256Hasher)
 
-	if _, err := io.Copy(multiHashWriter, getReader()); err != nil {
+	if _, err := io.Copy(multiHashWriter, r); err != nil {
 		return nil, fmt.Errorf("failed to compute file hashes: %w", err)
 	}
 
@@ -398,7 +320,7 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.Reader, filePath 
 
 	// --- Phase 2: Body/NDB signature matching ---
 	if s.db.NDB.TotalCount() > 0 {
-		if err := seekToStart(); err != nil {
+		if _, err := r.Seek(0, io.SeekStart); err != nil {
 			return nil, fmt.Errorf("failed to seek to start for NDB scan: %w", err)
 		}
 
@@ -408,7 +330,7 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.Reader, filePath 
 			hexDepth = 65536 // Default: 64KB
 		}
 
-		limitedReader := io.LimitReader(getReader(), hexDepth)
+		limitedReader := io.LimitReader(r, hexDepth)
 		content, err := io.ReadAll(limitedReader)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read content for NDB scan: %w", err)
