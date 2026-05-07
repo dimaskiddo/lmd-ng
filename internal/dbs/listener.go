@@ -1,11 +1,13 @@
 package dbs
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
 	"os"
 	"runtime"
+	"syscall"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
@@ -24,35 +26,45 @@ func NewListener(cfg *config.Config) (net.Listener, error) {
 
 	switch cfg.Server.Network {
 	case "tcp":
-		return newTCPListener(cfg.Server.Address, tlsConfig)
+		return newTCPListener(cfg.Server.Address, cfg.Server.SocketBacklog, tlsConfig)
 
 	case "unix":
-		return newUnixListener(cfg.Server.SocketPath, tlsConfig)
+		return newUnixListener(cfg.Server.SocketPath, cfg.Server.SocketBacklog, tlsConfig)
 
 	default:
 		// Default to unix on non-Windows, tcp on Windows
 		if runtime.GOOS == "windows" {
-			return newTCPListener(cfg.Server.Address, tlsConfig)
+			return newTCPListener(cfg.Server.Address, cfg.Server.SocketBacklog, tlsConfig)
 		}
 
-		return newUnixListener(cfg.Server.SocketPath, tlsConfig)
+		return newUnixListener(cfg.Server.SocketPath, cfg.Server.SocketBacklog, tlsConfig)
 	}
 }
 
 // newTCPListener creates a TLS-wrapped TCP listener.
-func newTCPListener(address string, tlsConfig *tls.Config) (net.Listener, error) {
-	ln, err := tls.Listen("tcp", address, tlsConfig)
+func newTCPListener(address string, backlog int, tlsConfig *tls.Config) (net.Listener, error) {
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			return c.Control(func(fd uintptr) {
+				_ = syscall.Listen(int(fd), backlog)
+			})
+		},
+	}
+
+	rawLn, err := lc.Listen(context.Background(), "tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on TCP %s: %w", address, err)
 	}
 
-	log.Info("DBS server listening on TCP", "address", address)
-	return ln, nil
+	tlsLn := tls.NewListener(rawLn, tlsConfig)
+
+	log.Info("DBS server listening on TCP", "address", address, "backlog", backlog)
+	return tlsLn, nil
 }
 
 // newUnixListener creates a TLS-wrapped Unix domain socket listener.
 // It cleans up any stale socket file from a previous run before binding.
-func newUnixListener(socketPath string, tlsConfig *tls.Config) (net.Listener, error) {
+func newUnixListener(socketPath string, backlog int, tlsConfig *tls.Config) (net.Listener, error) {
 	// Remove stale socket file if it exists from a previous run
 	if _, err := os.Stat(socketPath); err == nil {
 		// Attempt to connect — if we can, another instance is running
@@ -69,7 +81,15 @@ func newUnixListener(socketPath string, tlsConfig *tls.Config) (net.Listener, er
 		}
 	}
 
-	rawLn, err := net.Listen("unix", socketPath)
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			return c.Control(func(fd uintptr) {
+				_ = syscall.Listen(int(fd), backlog)
+			})
+		},
+	}
+
+	rawLn, err := lc.Listen(context.Background(), "unix", socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on Unix socket %s: %w", socketPath, err)
 	}
@@ -83,6 +103,6 @@ func newUnixListener(socketPath string, tlsConfig *tls.Config) (net.Listener, er
 	// Wrap the Unix socket with TLS for encrypted communication
 	tlsLn := tls.NewListener(rawLn, tlsConfig)
 
-	log.Info("DBS server listening on Unix socket", "path", socketPath)
+	log.Info("DBS server listening on Unix socket", "path", socketPath, "backlog", backlog)
 	return tlsLn, nil
 }

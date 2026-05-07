@@ -40,11 +40,13 @@ type LoggingConfig struct {
 
 // ServerConfig holds DBS server/client connection configuration.
 type ServerConfig struct {
-	Network           string    `yaml:"network" mapstructure:"network"`                         // "unix" or "tcp" (default: "unix")
-	SocketPath        string    `yaml:"socket_path" mapstructure:"socket_path"`                 // Unix socket path
-	Address           string    `yaml:"address" mapstructure:"address"`                         // TCP listen address
-	StreamBufferLimit string    `yaml:"stream_buffer_limit" mapstructure:"stream_buffer_limit"` // Limit for RAM buffering before falling back to disk temp files (e.g., "10M")
-	TLS               TLSConfig `yaml:"tls" mapstructure:"tls"`
+	Network             string    `yaml:"network" mapstructure:"network"`                             // "unix" or "tcp" (default: "unix")
+	SocketPath          string    `yaml:"socket_path" mapstructure:"socket_path"`                     // Unix socket path
+	Address             string    `yaml:"address" mapstructure:"address"`                             // TCP listen address
+	SocketBacklog       int       `yaml:"socket_backlog" mapstructure:"socket_backlog"`               // Listen backlog for DBS server
+	ConnectionPoolLimit int       `yaml:"connection_pool_limit" mapstructure:"connection_pool_limit"` // Max reusable connections for client
+	StreamBufferLimit   string    `yaml:"stream_buffer_limit" mapstructure:"stream_buffer_limit"`     // Limit for RAM buffering before falling back to disk temp files (e.g., "10M")
+	TLS                 TLSConfig `yaml:"tls" mapstructure:"tls"`
 }
 
 // TLSConfig holds mutual TLS settings. TLS is always enabled — there is no
@@ -73,20 +75,21 @@ type MonitorConfig struct {
 
 // ScannerConfig holds malware scanning settings.
 type ScannerConfig struct {
-	SignaturePath  string   `yaml:"signature_path" mapstructure:"signature_path"`
-	ClamAVEnabled  bool     `yaml:"clamav_enabled" mapstructure:"clamav_enabled"`
-	ClamAVDBPath   string   `yaml:"clamav_db_path" mapstructure:"clamav_db_path"`
-	ClamAVHexDepth int      `yaml:"clamav_hex_depth" mapstructure:"clamav_hex_depth"`
-	MaxFilesize    string   `yaml:"max_filesize" mapstructure:"max_filesize"`
-	MinFilesize    int64    `yaml:"min_filesize" mapstructure:"min_filesize"`
-	MaxDepth       int      `yaml:"max_depth" mapstructure:"max_depth"`
-	HexDepth       int      `yaml:"hex_depth" mapstructure:"hex_depth"`
-	CPULimit       int      `yaml:"cpu_limit" mapstructure:"cpu_limit"`
-	IgnoreRoot     bool     `yaml:"ignore_root" mapstructure:"ignore_root"`
-	IgnoreUsers    []string `yaml:"ignore_users" mapstructure:"ignore_users"`
-	IgnoreGroups   []string `yaml:"ignore_groups" mapstructure:"ignore_groups"`
-	IncludeRegex   string   `yaml:"include_regex" mapstructure:"include_regex"`
-	ExcludeRegex   string   `yaml:"exclude_regex" mapstructure:"exclude_regex"`
+	SignaturePath    string   `yaml:"signature_path" mapstructure:"signature_path"`
+	ClamAVEnabled    bool     `yaml:"clamav_enabled" mapstructure:"clamav_enabled"`
+	ClamAVDBPath     string   `yaml:"clamav_db_path" mapstructure:"clamav_db_path"`
+	ClamAVHexDepth   int      `yaml:"clamav_hex_depth" mapstructure:"clamav_hex_depth"`
+	MaxFilesize      string   `yaml:"max_filesize" mapstructure:"max_filesize"`
+	MinFilesize      int64    `yaml:"min_filesize" mapstructure:"min_filesize"`
+	MaxDepth         int      `yaml:"max_depth" mapstructure:"max_depth"`
+	HexDepth         int      `yaml:"hex_depth" mapstructure:"hex_depth"`
+	CPULimit         int      `yaml:"cpu_limit" mapstructure:"cpu_limit"`
+	ConcurrencyLimit int      `yaml:"concurrency_limit" mapstructure:"concurrency_limit"`
+	IgnoreRoot       bool     `yaml:"ignore_root" mapstructure:"ignore_root"`
+	IgnoreUsers      []string `yaml:"ignore_users" mapstructure:"ignore_users"`
+	IgnoreGroups     []string `yaml:"ignore_groups" mapstructure:"ignore_groups"`
+	IncludeRegex     string   `yaml:"include_regex" mapstructure:"include_regex"`
+	ExcludeRegex     string   `yaml:"exclude_regex" mapstructure:"exclude_regex"`
 	// HashAllowlistPaths is an optional list of path prefixes under which
 	// MD5 and SHA256 hash-engine detections are suppressed. This guards
 	// against a bad signature database containing hashes of legitimate
@@ -161,6 +164,8 @@ func SetDefaultConfig(config *Config) {
 	config.Server.Network = "unix"
 	config.Server.SocketPath = filepath.Join(config.App.BasePath, "lmd-ng.sock")
 	config.Server.Address = "127.0.0.1:7890"
+	config.Server.SocketBacklog = 1024
+	config.Server.ConnectionPoolLimit = 128
 	config.Server.StreamBufferLimit = "10M"
 
 	config.Server.TLS.AutoCert = true
@@ -185,6 +190,7 @@ func SetDefaultConfig(config *Config) {
 	config.Scanner.MaxDepth = 0
 	config.Scanner.HexDepth = 20000
 	config.Scanner.CPULimit = 0
+	config.Scanner.ConcurrencyLimit = 64
 
 	config.Scanner.IgnoreRoot = true
 	config.Scanner.IgnoreUsers = []string{"root"}

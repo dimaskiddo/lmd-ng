@@ -35,6 +35,8 @@ type Client struct {
 	tlsConfig *tls.Config
 	network   string
 	address   string
+	pool      chan net.Conn
+	sem       chan struct{}
 }
 
 // NewClient creates a new DBS client from the application configuration.
@@ -68,7 +70,30 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		tlsConfig: tlsConfig,
 		network:   network,
 		address:   address,
+		pool:      make(chan net.Conn, cfg.Server.ConnectionPoolLimit),
+		sem:       make(chan struct{}, cfg.Scanner.ConcurrencyLimit),
 	}, nil
+}
+
+// getConn retrieves a connection from the pool or dials a new one if the pool is empty.
+func (c *Client) getConn(ctx context.Context) (net.Conn, error) {
+	select {
+	case conn := <-c.pool:
+		return conn, nil
+	default:
+		return c.dial(ctx)
+	}
+}
+
+// releaseConn returns a healthy connection to the pool. If the pool is full, it closes it.
+func (c *Client) releaseConn(conn net.Conn) {
+	select {
+	case c.pool <- conn:
+		// Connection successfully returned to the pool
+	default:
+		// Pool is full, close the connection
+		conn.Close()
+	}
 }
 
 // dial establishes a TLS connection to the DBS server.
@@ -177,12 +202,31 @@ func (c *Client) ScanFile(ctx context.Context, filePath string) ([]*scanner.Scan
 	}
 	defer file.Close()
 
-	// Connect to DBS
-	conn, err := c.dial(ctx)
+	// Throttle concurrent scans
+	select {
+	case c.sem <- struct{}{}:
+		// Acquired semaphore
+		defer func() { <-c.sem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	// Connect to DBS using connection pool
+	conn, err := c.getConn(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+
+	// Assume the connection might be broken during use; default to closing it.
+	// Only release it back to the pool if the entire operation succeeds perfectly.
+	connHealthy := false
+	defer func() {
+		if connHealthy {
+			c.releaseConn(conn)
+		} else {
+			conn.Close()
+		}
+	}()
 
 	// Send scan request header
 	reqPayload := protocol.EncodeScanRequest(&protocol.ScanRequestHeader{
@@ -248,7 +292,10 @@ func (c *Client) ScanFile(ctx context.Context, filePath string) ([]*scanner.Scan
 		return nil, nil
 	}
 
-	// Convert protocol results to scanner results
+	// Scan completely succeeded, connection is healthy and can be reused
+	connHealthy = true
+
+	// Convert protocol.ScanResultEntry back to scanner.ScanResults
 	results := make([]*scanner.ScanResult, len(resultMsg.Results))
 	for i, entry := range resultMsg.Results {
 		results[i] = &scanner.ScanResult{
