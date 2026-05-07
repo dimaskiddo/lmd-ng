@@ -46,7 +46,7 @@ func newTCPListener(address string, backlog int, tlsConfig *tls.Config) (net.Lis
 	lc := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
-				_ = syscall.Listen(int(fd), backlog)
+				_ = setBacklog(fd, backlog)
 			})
 		},
 	}
@@ -84,7 +84,7 @@ func newUnixListener(socketPath string, backlog int, tlsConfig *tls.Config) (net
 	lc := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
-				_ = syscall.Listen(int(fd), backlog)
+				_ = setBacklog(fd, backlog)
 			})
 		},
 	}
