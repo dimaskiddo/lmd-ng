@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
@@ -140,6 +141,11 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	// Read the first frame to determine request type
 	msgType, payload, err := protocol.ReadFrame(conn)
 	if err != nil {
+		if err == io.EOF || strings.Contains(err.Error(), "broken pipe") || strings.Contains(err.Error(), "connection reset by peer") {
+			log.Debug("Client disconnected before sending request", "error", err)
+			return
+		}
+
 		log.Error("Failed to read initial frame from client", "error", err)
 		s.sendError(conn, fmt.Sprintf("failed to read frame: %v", err))
 		return
@@ -332,6 +338,10 @@ func (s *Server) handleReloadRequest(conn net.Conn) {
 // sendError sends an error message back to the client.
 func (s *Server) sendError(conn net.Conn, errMsg string) {
 	if err := protocol.WriteFrame(conn, protocol.MsgError, []byte(errMsg)); err != nil {
-		log.Error("Failed to send error to client", "error", err)
+		if err == io.EOF || strings.Contains(err.Error(), "broken pipe") || strings.Contains(err.Error(), "connection reset by peer") {
+			log.Debug("Failed to send error to client (client disconnected)", "error", err)
+		} else {
+			log.Error("Failed to send error to client", "error", err)
+		}
 	}
 }

@@ -190,6 +190,45 @@ func (c *Client) ScanFile(ctx context.Context, filePath string) ([]*scanner.Scan
 		return nil, nil
 	}
 
+	maxRetries := 3
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+
+		default:
+		}
+
+		results, err := c.attemptScanFile(ctx, filePath, info.Size())
+		if err == nil {
+			return results, nil
+		}
+
+		lastErr = err
+
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		log.Debug("Scan attempt failed, retrying", "file", filePath, "attempt", attempt, "max", maxRetries, "error", err)
+
+		if attempt < maxRetries {
+			select {
+			case <-time.After(1 * time.Second):
+
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("failed to scan file %s after %d attempts: %w", filePath, maxRetries, lastErr)
+}
+
+// attemptScanFile performs a single attempt to scan a file.
+func (c *Client) attemptScanFile(ctx context.Context, filePath string, fileSize int64) ([]*scanner.ScanResult, error) {
 	// Open the file
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -231,7 +270,7 @@ func (c *Client) ScanFile(ctx context.Context, filePath string) ([]*scanner.Scan
 	// Send scan request header
 	reqPayload := protocol.EncodeScanRequest(&protocol.ScanRequestHeader{
 		FilePath: filePath,
-		FileSize: info.Size(),
+		FileSize: fileSize,
 	})
 
 	if err := protocol.WriteFrame(conn, protocol.MsgScanRequest, reqPayload); err != nil {

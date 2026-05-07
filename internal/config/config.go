@@ -165,7 +165,7 @@ func SetDefaultConfig(config *Config) {
 	config.Server.SocketPath = filepath.Join(config.App.BasePath, "lmd-ng.sock")
 	config.Server.Address = "127.0.0.1:7890"
 	config.Server.SocketBacklog = 1024
-	config.Server.ConnectionPoolLimit = 128
+	config.Server.ConnectionPoolLimit = 256
 	config.Server.StreamBufferLimit = "10M"
 
 	config.Server.TLS.AutoCert = true
@@ -190,7 +190,7 @@ func SetDefaultConfig(config *Config) {
 	config.Scanner.MaxDepth = 0
 	config.Scanner.HexDepth = 20000
 	config.Scanner.CPULimit = 0
-	config.Scanner.ConcurrencyLimit = 64
+	config.Scanner.ConcurrencyLimit = 192
 
 	config.Scanner.IgnoreRoot = true
 	config.Scanner.IgnoreUsers = []string{"root"}
