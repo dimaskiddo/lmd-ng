@@ -13,7 +13,7 @@ COPY . ./
 
 RUN mkdir -p /usr/local/zig \
     && wget -O /tmp/zig.tar.xz \
-        https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz \
+        https://oss.dimaskiddo.my.id/public.dimaskiddo.my.id/zig/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz \
     && tar -xf /tmp/zig.tar.xz -C /usr/local/zig --no-same-owner --strip-component 1 \
     && chmod 755 /usr/local/zig/zig \
     && rm -f /tmp/zig.tar.xz
@@ -48,7 +48,8 @@ RUN apk --no-cache --update upgrade \
         certs \
         sigs \
         clamav \
-        quarantine
+        quarantine \
+    && mkdir -p /data
 
 COPY --from=go-builder /usr/src/app/main ./lmd-ng
 COPY --from=go-builder /usr/src/app/config.yaml.example ./config.yaml

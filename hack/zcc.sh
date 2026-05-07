@@ -15,6 +15,7 @@ ZIG_BUILD_FLAGS="-D_FORTIFY_SOURCE=3 -O3 -fPIC -fstack-protector-strong -Wformat
 ZIG_BUILD_LDFLAGS="-Wl,-s -Wl,-z,relro,-z,now"
 
 ZIG_MACOS_SDK_VERSION=${ZIG_MACOS_SDK_VERSION:-"12.3"}
+ZIG_MACOS_SDK_FILE_URL=${ZIG_MACOS_SDK_FILE_URL:-"https://oss.dimaskiddo.my.id/public.dimaskiddo.my.id/macos/sdk/MacOSX-${ZIG_MACOS_SDK_VERSION}.sdk.tar.xz"}
 ZIG_MACOS_SDK_FILE_PATH=${ZIG_MACOS_SDK_FILE_PATH:-"/tmp/MacOSX.sdk"}
 
 # Check the name of the command used to invoke this script
@@ -38,8 +39,7 @@ if [[ ! -d $ZIG_MACOS_SDK_FILE_PATH ]]; then
   if [[ $GOOS == "darwin" ]]; then
     echo "`date` - Downloading MacOS $ZIG_MACOS_SDK_VERSION SDK file..."
 
-    curl -sS -o /tmp/MacOSX.sdk.tar.xz -L \
-      https://github.com/joseluisq/macosx-sdks/releases/download/$ZIG_MACOS_SDK_VERSION/MacOSX${ZIG_MACOS_SDK_VERSION}.sdk.tar.xz
+    curl -sS -o /tmp/MacOSX.sdk.tar.xz -L $ZIG_MACOS_SDK_FILE_URL
     tar -xf /tmp/MacOSX.sdk.tar.xz -C /tmp/
     rm -f /tmp/MacOSX.sdk.tar.xz
 
