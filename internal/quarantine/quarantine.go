@@ -523,7 +523,9 @@ func (qm *QuarantineManager) encryptFile(filePath string, key []byte) (string, [
 	}
 
 	if err := os.Remove(filePath); err != nil {
-		log.Warn("Failed to remove original file after encryption", "file", filePath, "error", err)
+		if !os.IsNotExist(err) {
+			log.Warn("Failed to remove original file after encryption", "file", filePath, "error", err)
+		}
 	}
 
 	return encryptedTempFilePath, nonce, nil

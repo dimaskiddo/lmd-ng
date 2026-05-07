@@ -88,6 +88,11 @@ func (dm *darwinMonitor) isExcluded(eventPath string) bool {
 func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fsevents.EventFlags) {
 	log.Debug("Monitor event received", "path", path, "flags", fmt.Sprintf("0x%x", flags))
 
+	// Exclude quarantine artifacts and temp files
+	if strings.HasSuffix(path, ".enc.tmp") || strings.HasSuffix(path, ".dec.tmp") || strings.HasSuffix(path, ".quarantined") || strings.HasSuffix(path, ".metadata.json") {
+		return
+	}
+
 	// Skip directory events — we only scan files
 	info, statErr := os.Lstat(path)
 	if statErr == nil && info.IsDir() {

@@ -97,6 +97,11 @@ func (om *otherMonitor) addRecursive(path string) error {
 
 // handleEvent processes a single fsnotify event.
 func (om *otherMonitor) handleEvent(ctx context.Context, name string, op fsnotify.Op) {
+	// Exclude quarantine artifacts and temp files
+	if strings.HasSuffix(name, ".enc.tmp") || strings.HasSuffix(name, ".dec.tmp") || strings.HasSuffix(name, ".quarantined") || strings.HasSuffix(name, ".metadata.json") {
+		return
+	}
+
 	// If a new directory is created, add it to the watcher recursively
 	info, statErr := os.Lstat(name)
 	if statErr == nil && info.IsDir() {

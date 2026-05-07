@@ -3,6 +3,10 @@ package rtp
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/dbs"
@@ -22,6 +26,7 @@ type RTP struct {
 	monitor       *monitor.Monitor
 	notifier      notifier.Notifier
 	quarantineMgr quarantine.Manager
+	recentScans   sync.Map
 }
 
 // NewRTP creates a new Real-Time Protector client. It establishes a DBS client
@@ -66,7 +71,36 @@ func (r *RTP) Start(ctx context.Context) error {
 
 	log.Info("LMD-NG Real-Time Protector started")
 
+	// Start the Janitor to clean up the recentScans map and prevent memory leaks
+	go r.cleanupRecentScans(ctx)
+
 	return r.monitor.Start(ctx)
+}
+
+// cleanupRecentScans runs a periodic background task to remove old entries from
+// the recentScans map, preventing it from growing indefinitely.
+func (r *RTP) cleanupRecentScans(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-ticker.C:
+			now := time.Now()
+			r.recentScans.Range(func(key, value interface{}) bool {
+				lastScanTime := value.(time.Time)
+				// Our debounce window is 500ms, so 5 seconds is more than enough time to keep it
+				if now.Sub(lastScanTime) > 5*time.Second {
+					r.recentScans.Delete(key)
+				}
+
+				return true
+			})
+		}
+	}
 }
 
 // Stop stops the Real-Time Protector.
@@ -76,9 +110,19 @@ func (r *RTP) Stop() error {
 }
 
 // scanAndAct implements the monitor.ScanFunc interface. It streams a file to
-// the DBS server for scanning and handles quarantine locally if malware is
 // detected. This is called by the monitor for each file system event.
 func (r *RTP) scanAndAct(ctx context.Context, filePath string) ([]*scanner.ScanResult, bool) {
+	// Debounce: check if we scanned this exact file in the last 500ms
+	if lastScanVal, ok := r.recentScans.Load(filePath); ok {
+		lastScanTime := lastScanVal.(time.Time)
+		if time.Since(lastScanTime) < 500*time.Millisecond {
+			log.Debug("Skipping scan, file was scanned very recently", "file", filePath)
+			return nil, false
+		}
+	}
+
+	r.recentScans.Store(filePath, time.Now())
+
 	results, err := r.dbsClient.ScanFile(ctx, filePath)
 	if err != nil {
 		log.Error("Failed to scan file via DBS", "filepath", filePath, "error", err)
@@ -98,7 +142,11 @@ func (r *RTP) scanAndAct(ctx context.Context, filePath string) ([]*scanner.ScanR
 
 		_, qErr := r.quarantineMgr.Quarantine(ctx, filePath, results[0].SignatureName, results[0].SignatureType)
 		if qErr != nil {
-			log.Error("Failed to quarantine file", "file", filePath, "error", qErr)
+			if os.IsNotExist(qErr) || strings.Contains(qErr.Error(), "no such file or directory") {
+				log.Debug("File already handled by another process", "file", filePath)
+			} else {
+				log.Error("Failed to quarantine file", "file", filePath, "error", qErr)
+			}
 		} else {
 			quarantined = true
 		}
