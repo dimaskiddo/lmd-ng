@@ -27,14 +27,27 @@ LMD-NG utilizes a **Client-Server Architecture** to maximize efficiency. A centr
 ```mermaid
 graph TD
     subgraph "DBS Server (Database Signature Service)"
-        DB["Signature Databases"] --> Engine["Memory Loader"]
-        Engine --> Matcher["Pattern Matcher"]
+        DB_S["Signature Databases"] --> Engine_S["Memory Loader"]
+        Engine_S --> Matcher_S["Pattern Matcher"]
     end
 
     subgraph "Clients (RTP / Scan CLI)"
-        Source["File System Events / Path"] --> Streamer["Data Streamer"]
-        Streamer -- "Encrypted Stream" --> Matcher
-        Matcher -- "Detection Result" --> ActionHandler["Action Handler"]
+        Source["File System Events / Path"]
+        
+        subgraph "Local Engine (On-Demand Fallback)"
+            DB_L["Local DB"] --> Engine_L["Memory Loader"]
+            Engine_L --> Matcher_L["Pattern Matcher"]
+        end
+
+        Streamer["Data Streamer"]
+        
+        Source --> Streamer
+        Streamer -- "Remote Matching" --> Matcher_S
+        Source -- "Local Matching" --> Matcher_L
+        
+        Matcher_S -- "Detection Result" --> ActionHandler["Action Handler"]
+        Matcher_L -- "Detection Result" --> ActionHandler
+        
         ActionHandler --> Notifier["Email / Telegram"]
         ActionHandler --> Quarantine["Quarantine Manager"]
     end
@@ -60,8 +73,8 @@ graph TD
 2.  **Run the combined daemon:**
     ```sh
     docker run -d \
-      -v /path/to/config.yaml:/usr/app/lmd-ng/config.yaml \
       -v /data/to/protect:/data:rw \
+      -v /path/to/config.yaml:/usr/local/lmd-ng/config.yaml \
       --name lmd-ng \
       dimaskiddo/lmd-ng:latest
     ```
