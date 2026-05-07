@@ -94,6 +94,13 @@ func (qm *QuarantineManager) Quarantine(ctx context.Context, filePath string, de
 		return "", fmt.Errorf("failed to create quarantine directory %s: %w", qm.cfg.Path, err)
 	}
 
+	// Ensure filePath is absolute so metadata remains valid regardless of CWD
+	absFilePath, err := filepath.Abs(filePath)
+	if err != nil {
+		log.Warn("Failed to resolve absolute path for quarantine metadata, using raw path", "file", filePath, "error", err)
+		absFilePath = filePath
+	}
+
 	// Capture file attributes BEFORE moving (Lstat to avoid following symlinks).
 	info, err := os.Lstat(filePath)
 	if err != nil {
@@ -103,7 +110,7 @@ func (qm *QuarantineManager) Quarantine(ctx context.Context, filePath string, de
 	uid, gid, username, groupName := captureOwnership(info)
 
 	metadata := Metadata{
-		OriginalPath:    filePath,
+		OriginalPath:    absFilePath,
 		DetectionInfo:   detectionInfo,
 		DetectionEngine: detectionEngine,
 		FileMode:        uint32(info.Mode()),
@@ -191,7 +198,7 @@ func (qm *QuarantineManager) Quarantine(ctx context.Context, filePath string, de
 	}
 
 	log.Info("File quarantined",
-		"original_path", filePath,
+		"original_path", absFilePath,
 		"quarantine_path", finalQuarantinePath,
 		"detection_info", detectionInfo,
 		"detection_engine", detectionEngine,

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -143,9 +144,15 @@ func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string, qMgr 
 					return
 				}
 
+				// Ensure we log absolute path for detections
+				absFilePath, err := filepath.Abs(filePath)
+				if err != nil {
+					absFilePath = filePath
+				}
+
 				// If quarantine manager provided and quarantine enabled, quarantine file
 				if qMgr != nil && sc.cfg.Quarantine.Enabled {
-					log.Info("Threat detected, quarantining file", "file", filePath, "detections", len(fileResults))
+					log.Info("Threat detected, quarantining file", "file", absFilePath, "detections", len(fileResults))
 
 					_, qErr := qMgr.Quarantine(childCtx, filePath, fileResults[0].SignatureName, fileResults[0].SignatureType)
 					if qErr != nil {

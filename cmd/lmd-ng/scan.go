@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -81,7 +82,12 @@ func runDBSScan(ctx context.Context, dbsClient *dbs.Client, scanPath string) {
 
 		// Client-side quarantine
 		if cfg.Quarantine.Enabled {
-			log.Info("Threat detected, quarantining file", "file", filePath, "detections", len(results))
+			absFilePath, err := filepath.Abs(filePath)
+			if err != nil {
+				absFilePath = filePath
+			}
+
+			log.Info("Threat detected, quarantining file", "file", absFilePath, "detections", len(results))
 
 			_, qErr := qMgr.Quarantine(ctx, filePath, results[0].SignatureName, results[0].SignatureType)
 			if qErr != nil {

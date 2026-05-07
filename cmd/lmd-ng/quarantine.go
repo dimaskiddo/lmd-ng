@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -124,13 +125,18 @@ func quarantineAddCmd() *cobra.Command {
 			cfg := cfgMgr.GetConfig()
 			qm := quarantine.NewQuarantineManager(&cfg.Quarantine)
 
+			absFilePath, err := filepath.Abs(filePath)
+			if err != nil {
+				absFilePath = filePath
+			}
+
 			quarantinePath, err := qm.Quarantine(ctx, filePath, manualQuarantineInfo, "")
 			if err != nil {
 				log.Error("Failed to quarantine file", "path", filePath, "error", err)
 				os.Exit(1)
 			}
 
-			log.Info("File quarantined successfully", "original_path", filePath, "quarantine_path", quarantinePath)
+			log.Info("File quarantined successfully", "original_path", absFilePath, "quarantine_path", quarantinePath)
 		},
 	}
 }
