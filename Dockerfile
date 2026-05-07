@@ -11,7 +11,10 @@ WORKDIR /usr/src/app
 
 COPY . ./
 
-RUN mkdir -p /usr/local/zig \
+RUN apk upgrade --no-cache --update \
+    && apk add --no-cache --update \
+        bash \
+    && mkdir -p /usr/local/zig \
     && wget -O /tmp/zig.tar.xz \
         https://oss.dimaskiddo.my.id/public.dimaskiddo.my.id/zig/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz \
     && tar -xf /tmp/zig.tar.xz -C /usr/local/zig --no-same-owner --strip-component 1 \
