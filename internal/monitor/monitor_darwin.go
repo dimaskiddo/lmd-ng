@@ -106,7 +106,19 @@ func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fse
 	isRename := flags&fsevents.ItemRenamed != 0
 
 	if isCreate || isModify || isRename {
-		log.Info("File system event detected, triggering scan", "file", path, "flags", fmt.Sprintf("0x%x", flags))
+		var ops []string
+		if isCreate {
+			ops = append(ops, "CREATE")
+		}
+		if isModify {
+			ops = append(ops, "WRITE")
+		}
+		if isRename {
+			ops = append(ops, "RENAME")
+		}
+		opString := strings.Join(ops, "|")
+
+		log.Info("File system event detected, triggering scan", "file", path, "event", opString)
 
 		results, quarantined := dm.parent.scanFunc(ctx, path)
 		if quarantined && len(results) > 0 {
