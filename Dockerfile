@@ -41,9 +41,9 @@ MAINTAINER Dimas Restu Hidayanto <drh.dimasrestu@gmail.com>
 
 ARG SERVICE_NAME="lmd-ng"
 
-ENV PATH $PATH:/usr/app/${SERVICE_NAME}
+ENV PATH $PATH:/usr/local/${SERVICE_NAME}
 
-WORKDIR /usr/app/${SERVICE_NAME}
+WORKDIR /usr/local/${SERVICE_NAME}
 
 RUN apk --no-cache --update upgrade \
     && mkdir -p \
