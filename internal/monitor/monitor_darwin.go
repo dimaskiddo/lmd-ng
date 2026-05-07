@@ -160,6 +160,9 @@ func (dm *darwinMonitor) Start(ctx context.Context) error {
 		}
 	}
 
+	for _, p := range dm.parent.cfg.Monitor.Paths {
+		log.Info("Monitoring directory", "path", p)
+	}
 	log.Info("File system monitor started", "backend", "fsevents", "streams", len(dm.streams))
 
 	for {

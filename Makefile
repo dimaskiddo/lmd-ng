@@ -3,11 +3,11 @@ SERVICE_NAME       := lmd-ng
 REBASE_URL         := "github.com/dimaskiddo/lmd-ng"
 COMMIT_MSG         := "update improvement"
 
-VERSION_GIT := $(shell git describe --tags --always 2>/dev/null | sed -e 's|^v||g')
-VERSION     := $(if $(VERSION_GIT),$(VERSION_GIT),dev)
+VERSION_GIT 			 := $(shell git describe --tags --always 2>/dev/null | sed -e 's|^v||g')
+VERSION     			 := $(if $(VERSION_GIT),$(VERSION_GIT),dev)
 
-COMMIT_GIT  := $(shell git rev-parse --short HEAD 2>/dev/null)
-COMMIT      := $(if $(COMMIT_GIT),$(COMMIT_GIT),none)
+COMMIT_GIT  			 := $(shell git rev-parse --short HEAD 2>/dev/null)
+COMMIT      			 := $(if $(COMMIT_GIT),$(COMMIT_GIT),none)
 
 .PHONY:
 
@@ -42,7 +42,7 @@ publish:
 build:
 	make vendor
 	make init-dist
-	CC="\"$(PWD)/hack/zcc.sh\"" CXX="\"$(PWD)/hack/zcxx.sh\"" CGO_ENABLED=$(BUILD_CGO_ENABLED) go build -ldflags="-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -trimpath -a -o dist/$(SERVICE_NAME) ./cmd/lmd-ng
+	CC="\"$(PWD)/hack/zcc.sh\"" CXX="\"$(PWD)/hack/zcxx.sh\"" CGO_ENABLED=$(BUILD_CGO_ENABLED) go build -ldflags="-s -w -linkmode external -extldflags '-static' -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -trimpath -a -o dist/$(SERVICE_NAME) ./cmd/lmd-ng
 	rm -f ./*.o
 	echo "Build '$(SERVICE_NAME)' complete."
 

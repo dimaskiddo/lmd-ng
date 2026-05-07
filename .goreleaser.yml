@@ -10,6 +10,8 @@ builds:
     ldflags:
       - -s
       - -w
+      - -linkmode external
+      - -extldflags '-static'
       - -X main.version={{.Version}}
       - -X main.commit={{.ShortCommit}}
     flags:

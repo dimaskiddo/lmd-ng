@@ -132,6 +132,9 @@ func (om *otherMonitor) handleEvent(ctx context.Context, name string, op fsnotif
 
 // Start begins monitoring using fsnotify.
 func (om *otherMonitor) Start(ctx context.Context) error {
+	for _, p := range om.parent.cfg.Monitor.Paths {
+		log.Info("Monitoring directory", "path", p)
+	}
 	log.Info("File system monitor started", "backend", "fsnotify", "watched_dirs", len(om.watcher.WatchList()))
 
 	for {
