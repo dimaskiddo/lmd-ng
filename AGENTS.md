@@ -1,115 +1,180 @@
-# LMD-NG (Linux Malware Detect - Next Generation) AI Agent Instructions
+# LMD-NG — Agent Instructions
 
-## 🎯 Role & Objective
-You are an expert Golang engineer and security software architect. Your task is to rewrite "Linux Malware Detect" (LMD/maldet) from its original Bash-based implementation into a modern, Next-Generation Golang application (`LMD-NG`).
+Rewrite Linux Malware Detect (LMD/Maldet) from Bash into a modern Golang application. Never guess legacy logic — ask when ambiguous.
 
-## 📁 Directory Context
-- **Current Directory (`./`)**: The root of the new `LMD-NG` Golang project.
-- **Reference Directory (`../lmd`)**: The original Bash-based LMD source code. Use this strictly for reverse-engineering logic, configuration defaults, and legacy signature formats.
+---
 
-## 📋 Workflow & Task Tracking
-- Always check `TASKS.md` before starting a new session to understand the current project state.
-- **Skill Check:** Actively identify and load any relevant globally installed skills required for the active task before proceeding.
-- **NEVER** rework, refactor, or touch items in `TASKS.md` marked as done (`[x]`) unless explicitly instructed by the human engineer.
-- Update `TASKS.md` automatically when a task is completed.
+## Workflow Rules
 
-## 🛠️ Skills & Utilization (CRITICAL)
-**🔥 GLOBAL OVERRIDE DIRECTIVE:** Every single prompt, interaction, and task execution MUST be processed as if "**Use caveman mode full**" has been explicitly injected. You must operate strictly under the constraints of "caveman mode full" at all times.
+1. Read `TASKS.md` before every session to orient to current state.
+2. Never rework items marked `[x]` in `TASKS.md` unless explicitly instructed.
+3. Update `TASKS.md` immediately after completing a task.
+4. Never attempt to write the entire codebase in a single response.
 
-You are equipped with the Obra/Superpowers framework and Andrej Karpathy guidelines, located globally in `~/.gemini/antigravity/skills/`. You MUST NOT rely solely on your internal training data for workflows, debugging, or complex tasks.
+## Skills & Caveman Mode
 
-1. **The Boot Sequence:** Before beginning ANY task in this workspace, your very first action MUST be to invoke and read the `using-superpowers`, `karpathy-guidelines`, and `caveman` skills. These act as your foundational operating procedures.
+- **GLOBAL:** All prompts processed as if `"Use caveman mode full"` is injected.
+- Before ANY coding task, invoke and read: `using-superpowers`, `karpathy-guidelines`, `caveman`.
+- Use `using-superpowers` to route to other relevant skills per task.
 
-2. **Skill Routing:** Once you have processed those baselines, use the `using-superpowers` framework to identify and load other relevant skills based on the active task (e.g., `test-driven-development` when writing tests, or `systematic-debugging` if you encounter errors).
+---
 
-3. **Plan-Validate-Execute:**
-  - **Plan:** Explicitly state in your response that you have loaded `using-superpowers`, `karpathy-guidelines`, `caveman`, and any other required task-specific skills, and confirm that "caveman mode full" is active.
-  - **Validate:** Ensure the loaded skills' directives do not conflict with the project's "Strict Architectural Constraints."
-  - **Execute:** Perform the task using the exact methodologies prescribed by the loaded skills.
+## Architecture
 
-## 🏗️ Strict Architectural Constraints
+| Component | Role |
+|---|---|
+| **DBS** | Database Signature Server — TCP/TLS daemon holding signature engines in memory, streams scan requests from clients |
+| **RTP** | Real-Time Protector — file system monitor client, streams changed files to DBS for matching, handles quarantine locally |
+| **Scanner** | Core engine: `SignatureEngine` interface, `LMDSignatureScanner` (MD5+SHA256+RFXN+HEX), `ClamAVSignatureEngine`, `Walker`, `ScanCoordinator` |
+| **Monitor** | Platform-specific FS events: FSEvents on macOS, fsnotify on Linux/Windows |
+| **Scheduler** | Cron-based update + scan scheduling via `robfig/cron/v3` |
+| **Updater** | Downloads LMD signature packs (.tar.gz) and ClamAV CVD databases; version checking, atomic writes |
+| **Quarantine** | AES-256-GCM encryption, POSIX metadata capture/restore, short-ID lookup |
+| **Protocol** | Custom binary wire protocol: `[1-byte type][4-byte length][payload]` over TLS |
+| **Notifier** | `Notifier` interface + MultiNotifier; Email (SMTP) and Telegram (Bot API) |
+| **Service** | OS service install/uninstall via `kardianos/service` — `dbs` and `rtp` as separate services |
 
-### 1. CGO Enabled (via Zig Toolchain)
-- The application MUST be compiled with `CGO_ENABLED=1`. 
-- All C/C++ cross-compilation MUST strictly utilize the Zig compiler wrappers located at `hack/zcc.sh` (for C) and `hack/zcxx.sh` (for C++).
-- Standard `gcc` or `clang` must not be used to ensure seamless multi-platform targeting via Zig.
+## Signature Types
 
-### 2. Native OS Implementation (No OS CLI Wrappers)
-- LMD heavily relies on Linux binaries (`find`, `inotifywait`, `awk`, `sed`, `grep`). You must **NOT** use `os/exec` to call these tools.
-- **File Traversal:** Replace `find` with Go's `path/filepath` (e.g., `filepath.WalkDir`).
-- **File Monitoring:** Replace `inotifywait` with `github.com/fsnotify/fsevents` on macOS and `github.com/fsnotify/fsnotify` on Linux/Windows. You must utilize CGO with Zig's C Compiler to leverage native File System Events (FSE) on macOS. This specifically resolves the open file limit / file descriptor limitations associated with KQueue on macOS.
-- **Signature Matching:** Implement internal malware signature matching using Go's native `crypto` and `regexp` packages. Focus strictly on LMD's native Hex/MD5 signatures for the core implementation.
+| Format | Source | Status |
+|---|---|---|
+| MD5/SHA256 hashes | LMD native | Active |
+| HEX (hex-string) signatures | LMD native | Active |
+| RFXN (NDB hex-pattern) | LMD native via `pkg/clamav` NDB parser | Active |
+| ClamAV `.cvd`/`.cld`/`.ndb`/`.mdb`/`.hdb` | ClamAV | Implemented — pure-Go loader in `pkg/clamav/`, off by default (`clamav_enabled: false`) |
 
-### 3. Phased ClamAV Integration (Deferred)
-- **Phase 1 (Current):** Focus entirely on the main LMD functionality (file walking, monitoring, config parsing, and LMD native signature matching).
-- **Phase 2 (Deferred):** The native parsing and loading of ClamAV databases (`.cvd`, `.cld`) into memory will be built later as an "Extra Signature" module. 
-- **Requirement:** Design the core `scanner` interface to be highly extensible so the ClamAV engine can be seamlessly plugged in later. Once implemented, it must still be a pure-Go memory loader, completely avoiding `os/exec` calls to `clamscan` or `clamd`.
+## CLI
 
-### 4. Configuration Migration
-- The legacy LMD uses a bash-sourced configuration file (`conf.maldet`).
-- Map all existing configuration variables and their default values into a structured YAML format (`config.yaml`).
-- Create a robust configuration manager using a pure-Go library (e.g., `gopkg.in/yaml.v3` or `github.com/spf13/viper`). Honor the original intent of the legacy flags.
+```
+lmd-ng [--config <path>]
+  daemon                  # Start DBS + RTP in single process
+    dbs                   # Start only DBS server
+    rtp                   # Start only RTP client
+  scan <path>             # On-demand scan (DBS-first, local fallback)
+  update                  # Manual signature update
+  service
+    install [dbs|rtp]     # Install as OS service
+    uninstall [dbs|rtp]   # Remove OS service
+    start/stop/restart    # [dbs|rtp]
+  quarantine
+    list                  # List quarantined files
+    add <file>            # Manually quarantine
+    restore <id|path>     # Restore quarantined file
+    remove <id|path>      # Permanently delete (requires --force)
+  version
+```
 
-### 5. CLI, Scheduler & Service Management
-- **No OS Cron:** Do not rely on `/etc/cron.daily` or similar OS-level cron daemons.
-- **Internal Scheduler:** Implement scheduling for updates and daemon scans using pure Go (e.g., `github.com/robfig/cron/v3` or native `time.Ticker`).
-- **CLI Framework:** Build a robust CLI interface using `github.com/spf13/cobra` or the native `flag` package.
-- **Required Subcommands:**
-  - `lmd-ng daemon` (starts the resident monitor and internal scheduler)
-  - `lmd-ng scan <path>` (manual on-demand scan)
-  - `lmd-ng update` (manual signature update)
-  - `lmd-ng service install` (automates OS-level background service creation and auto-startup across Windows, Linux, and macOS, ideally using `github.com/kardianos/service`)
-  - `lmd-ng service uninstall` (removes the OS-level service)
+---
 
-### 6. Cross-Platform Compatibility
-- Ensure all file path constructions use `filepath.Join()`.
-- Abstract away any Linux-specific assumptions (e.g., hardcoded `/usr/local/maldetect` paths) into configurable variables.
-- The resulting binary must be capable of running smoothly on Windows, macOS, and Linux.
+## Critical Constraints
 
-### 7. Project Layout & Idiomatic Go
-- Follow the Standard Go Project Layout.
-- **`cmd/lmd-ng/`**: Contains the main application entry point.
-- **`internal/`**: Contains private application code (e.g., `scanner`, `monitor`, `scheduler`) to prevent external importing.
-- **`pkg/`**: Contains code that is safe for other projects to import (if any).
-- Use idiomatic Go naming conventions (e.g., `ErrFileNotFound` instead of `FileNotFoundError`).
+### Build — CGO + Zig
+- `CGO_ENABLED=1` always. C/C++ via `hack/zcc.sh` only — never raw `gcc`/`clang`.
 
-### 8. Observability & Logging
-- **No `fmt.Println` or `log.Fatal` in core packages.**
-- Use Go 1.21+'s native `log/slog` for structured, leveled logging (Debug, Info, Warn, Error).
-- Ensure the logger can output to both `stdout` (for CLI tasks) and a log file (when running as a daemon/service).
+### Native Implementation (No os/exec in core)
+- File traversal: `filepath.WalkDir`, not `find`.
+- File monitoring: `fsnotify` (Linux/Windows), `fsnotify/fsevents` (macOS FSE via CGO).
+- Signature matching: `crypto` for MD5/SHA256 hashes, `pkg/clamav` for HEX/NDB patterns.
 
-### 9. Context & Concurrency
-- Pass `context.Context` as the first parameter to any long-running or blocking function (e.g., scanning a directory, monitoring file systems).
-- Ensure graceful shutdowns. The daemon must intercept OS signals (`SIGINT`, `SIGTERM`) and use context cancellation to safely stop the monitor, scheduler, and active scans before exiting.
-- Manage goroutines carefully. Use `sync.WaitGroup` or `errgroup` to prevent goroutine leaks during concurrent scanning.
+### ClamAV
+- Fully implemented: `ClamAVSignatureEngine`, pure-Go CVD/CLD/HDB/MDB/NDB parsers in `pkg/clamav/`.
+- Toggled via `clamav_enabled: false` in config. Off by default — enable when needed.
 
-### 10. Error Handling
-- Never suppress errors silently. 
-- Use Go 1.13+ error wrapping (`fmt.Errorf("failed to scan file %s: %w", path, err)`).
-- Create custom sentinel errors (e.g., `var ErrSignatureMatch = errors.New("malware signature matched")`) to allow the CLI/daemon to handle specific states cleanly.
+### Configuration
+- YAML via `spf13/viper`. Legacy `conf.maldet` vars → `config.yaml`. Search: `--config` flag → binary dir → `/etc/lmd-ng/` → `/usr/local/etc/lmd-ng/` → `/usr/local/lmd-ng/`.
 
-### 11. Complete Code Generation (No Stubbing)
-- **NEVER** use placeholders like `// ... rest of the code`, `// TODO`, or `// implement logic here` in your generated code.
-- Always write complete, fully functional, and production-ready functions. If a file is too long for one response, stop and ask the user to let you continue.
+### CLI & Scheduler
+- `spf13/cobra` CLI, `robfig/cron/v3` scheduler. No OS cron.
 
-### 12. Memory Efficiency & I/O Streaming
-- **Never read entire files into memory** when calculating hashes or scanning for signatures (do not use `os.ReadFile` for target files).
-- You MUST use `os.Open` combined with `io.Reader`, `bufio.Scanner`, or `io.Copy` to process files in chunks or streams.
-- Keep memory allocations minimal during the `filepath.WalkDir` traversal.
+### Cross-Platform
+- `filepath.Join()` everywhere. No hardcoded paths.
+- Service: `kardianos/service` (systemd/launchd/SCM).
 
-### 13. Permission & Error Resiliency
-- When walking directories or opening files, expect `os.ErrPermission` (Permission Denied) and file lock errors.
-- The scanner must **never** crash or abort a full scan due to a single unreadable file. It should log the error at the `Warn` or `Debug` level and `continue` to the next file.
+### Logging
+- `log/slog` only. No `fmt.Println` or `log.Fatal` in core packages.
+- `lumberjack` for rotation. Rotation params bound to config.
 
-### 14. Dependency Discipline
-- Rely on the Go Standard Library (`stdlib`) whenever possible.
-- Before adding any new third-party dependency to `go.mod`, you must justify its use and ensure it is widely adopted, actively maintained, and completely free of CGO dependencies.
+### Context & Concurrency
+- `context.Context` as first param for long-running functions.
+- Graceful shutdown via OS signals + context cancellation.
+- `sync.Mutex`/`sync.RWMutex` on all shared state.
+- `errgroup` / `sync.WaitGroup` — no goroutine leaks.
 
-### 15. Build Artifacts & Integration Testing
-- **Build Output:** All compilation steps (e.g., `go build`) must output the final executable(s) into a dedicated `dist/` directory at the project root (e.g., `dist/lmd-ng`).
-- **Compiled Binary Testing:** Integration tests must validate the actual compiled binary located in the `dist/` directory, rather than just executing standard unit tests via `go test` on the source code. This ensures the final artifact functions correctly as a cohesive unit.
-- **Test Implementation:** While `os/exec` is strictly forbidden in the core application logic (per Constraint #2), it is **required and permitted** within integration test files (e.g., `tests/integration_test.go`) solely to execute, pass arguments to, and assert the output of the `dist/lmd-ng` binary.
+### Permission Resiliency
+- Expect `os.ErrPermission` during walks. Log at Warn/Debug, never crash or abort scan.
 
-## 🛑 Interactive Clarification Protocol (CRITICAL)
-The original LMD contains legacy bash logic, obscure regular expressions, and edge-case handling. 
-**DO NOT GUESS OR HALLUCINATE LOGIC.** If you encounter a bash command, configuration variable intent, or architectural decision that is ambiguous or not fully understood, you **MUST** pause execution, state the ambiguity, and ask the human engineer for clarification before writing the code.
+### Streaming I/O
+- Never `os.ReadFile` on target files. Use `os.Open` + `io.Reader` / `bufio.Scanner` for chunked processing. Keep memory minimal during walks.
+
+### Error Handling
+- Wrap with `fmt.Errorf %w`. Custom sentinel errors. Never suppress silently.
+
+### No Stubbing
+- Every function must be complete and production-ready. No `// TODO`, `// rest of code`, or placeholder logic.
+
+### Dependencies
+- Stdlib first. Third-party deps must be justified, widely adopted, CGO-free.
+
+### Build Artifacts
+- Output to `dist/` via Makefile. Integration tests validate compiled binary.
+
+---
+
+## Non-Negotiable Rules
+
+1. **No stubs.** Every file complete, production-ready.
+2. **No guessing** on legacy bash logic, regex, or ambiguous architecture. Pause, state ambiguity, ask.
+3. **Never auto-run pipeline.** Provide exact command + expected output, wait for user.
+4. **No system temp dirs.** Runtime files in configured paths only.
+
+---
+
+## Directory Tree
+
+```
+lmd-ng/
+├── cmd/lmd-ng/           # Entry: cobra CLI (main, daemon, scan, update, service, quarantine, version)
+├── internal/
+│   ├── config/           # Viper YAML config, path resolution, hot-reload (SIGHUP)
+│   ├── dbs/              # Database Signature Server (TCP/TLS, Unix socket)
+│   ├── rtp/              # Real-Time Protector (FS monitor client)
+│   ├── scanner/          # Signature engines, walker, scan coordinator
+│   ├── monitor/          # Platform-specific FS events (darwin/other)
+│   ├── scheduler/        # Cron-based update + scan scheduling
+│   ├── updater/          # LMD + ClamAV signature download
+│   ├── quarantine/       # AES-256-GCM quarantine, metadata capture
+│   ├── protocol/         # Binary wire protocol + TLS
+│   ├── notifier/         # Email + Telegram notifications
+│   ├── service/          # OS service management (kardianos/service)
+│   ├── log/              # slog wrapper + lumberjack rotation
+│   ├── util/             # Helpers (size parsing, internet check)
+│   └── syslimits/        # ulimit management (Unix)
+├── pkg/clamav/           # Public ClamAV DB parser (pure Go)
+├── docs/
+│   ├── ARCHITECTURE.md   # Module map, component internals, data flows
+│   └── WORKFLOWS.md      # Pipeline flow diagrams, operational sequences
+├── hack/zcc.sh           # Zig C compiler wrapper
+├── dist/                 # Build output
+├── config.yaml.example   # Full annotated config template
+├── Makefile              # Build targets (build, release, docker-build, clean)
+├── .goreleaser.yml       # Cross-platform release config
+└── Dockerfile            # Multi-stage Go+Zig build
+```
+
+---
+
+## References
+
+| File | Purpose |
+|---|---|
+| `config.yaml.example` | Full annotated config reference |
+| `docs/ARCHITECTURE.md` | Module map, component internals, data flows |
+| `docs/WORKFLOWS.md` | Pipeline flow diagrams, operational sequences |
+| `TASKS.md` | Current project state — read before every session |
+| `Makefile` | Build targets and cross-compilation |
+| `.goreleaser.yml` | Release configuration (darwin/linux/windows × 386/amd64/arm64) |
+| `hack/zcc.sh` | Zig CC wrapper — source of truth for build flags + security hardening |
+| `internal/scanner/` | Core scanning logic — walker, signature engines, coordinator |
+| `internal/dbs/` | DBS server implementation |
+| `internal/rtp/` | RTP client implementation |
+| `pkg/clamav/` | ClamAV database parser (CVD/CLD/HDB/MDB/NDB) |
