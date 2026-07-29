@@ -221,28 +221,18 @@ func setDefaultConfig(config *Config) {
 	config.Scanner.ScanIgnoreFilePatterns = []string{
 		// Archives
 		".tar", ".gz", ".bz2", ".7z", ".rar", ".arj", ".cab", ".iso",
-		// Documents
-		".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods",
-		// Audio
-		".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",
-		// Video
-		".mp4", ".avi", ".mov", ".mkv", ".webm", ".wmv", ".flv",
-		// Images
-		".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico",
-		// Database
-		".db", ".sqlite", ".sqlite3", ".mdb", ".accdb", ".mdf", ".ldf", ".ndf",
 		// VM/Disk
 		".vmdk", ".vdi", ".vhd", ".vhdx", ".qcow2", ".img", ".dmg",
-		// Editor/System Artifacts
-		".swp", ".swo", ".lock", ".pid",
 		// Logs
 		".log", ".journal",
 		// Cache/Temp
 		".cache", ".tmp", ".temp",
+		// Editor/System Artifacts
+		".swp", ".swo", ".lock", ".pid",
+		// LMD-NG Internal Artifacts
+		"lmd-scan-*",
 		// Office Temp Lock Files
 		"~$*",
-		// Exchange
-		".edb", ".chk",
 	}
 
 	config.Scheduler.UpdateInterval = "@daily"

@@ -86,6 +86,13 @@ func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fse
 		return
 	}
 
+	// Exclude DBS scan temp files — only skip files actually in our temp directory
+	scanTmpDir := filepath.Join(dm.parent.cfg.App.BasePath, "tmp")
+	if strings.HasPrefix(filepath.Base(path), "lmd-scan-") &&
+		strings.HasPrefix(path, scanTmpDir+string(filepath.Separator)) {
+		return
+	}
+
 	// Skip directory events — we only scan files
 	info, statErr := os.Lstat(path)
 	if statErr == nil && info.IsDir() {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/fsnotify/fsnotify"
 
@@ -93,6 +94,13 @@ func (om *otherMonitor) addRecursive(path string) error {
 func (om *otherMonitor) handleEvent(ctx context.Context, name string, op fsnotify.Op) {
 	// Exclude quarantine artifacts and temp files
 	if quarantine.IsQuarantineArtifact(name) {
+		return
+	}
+
+	// Exclude DBS scan temp files — only skip files actually in our temp directory
+	scanTmpDir := filepath.Join(om.parent.cfg.App.BasePath, "tmp")
+	if strings.HasPrefix(filepath.Base(name), "lmd-scan-") &&
+		strings.HasPrefix(name, scanTmpDir+string(filepath.Separator)) {
 		return
 	}
 

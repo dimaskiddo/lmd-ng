@@ -76,50 +76,6 @@ scanner:
     - ".arj"
     - ".cab"
     - ".iso"
-    # --- Documents ---
-    - ".pdf"
-    - ".doc"
-    - ".docx"
-    - ".xls"
-    - ".xlsx"
-    - ".ppt"
-    - ".pptx"
-    - ".odt"
-    - ".ods"
-    # --- Audio ---
-    - ".mp3"
-    - ".wav"
-    - ".flac"
-    - ".aac"
-    - ".ogg"
-    - ".wma"
-    - ".m4a"
-    # --- Video ---
-    - ".mp4"
-    - ".avi"
-    - ".mov"
-    - ".mkv"
-    - ".webm"
-    - ".wmv"
-    - ".flv"
-    # --- Images ---
-    - ".jpg"
-    - ".jpeg"
-    - ".png"
-    - ".gif"
-    - ".bmp"
-    - ".svg"
-    - ".webp"
-    - ".ico"
-    # --- Database ---
-    - ".db"
-    - ".sqlite"
-    - ".sqlite3"
-    - ".mdb"
-    - ".accdb"
-    - ".mdf"
-    - ".ldf"
-    - ".ndf"
     # --- VM/Disk ---
     - ".vmdk"
     - ".vdi"
@@ -128,11 +84,6 @@ scanner:
     - ".qcow2"
     - ".img"
     - ".dmg"
-    # --- Editor/System Artifacts ---
-    - ".swp"
-    - ".swo"
-    - ".lock"
-    - ".pid"
     # --- Logs ---
     - ".log"
     - ".journal"
@@ -140,11 +91,15 @@ scanner:
     - ".cache"
     - ".tmp"
     - ".temp"
+    # --- Editor/System Artifacts ---
+    - ".swp"
+    - ".swo"
+    - ".lock"
+    - ".pid"
+    # --- LMD-NG Internal Artifacts ---
+    - "lmd-scan-*"
     # --- Office Temp Lock Files ---
     - "~$*"
-    # --- Exchange ---
-    - ".edb"
-    - ".chk"
 
 scheduler:
   update_interval: "@daily"
