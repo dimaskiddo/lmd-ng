@@ -97,6 +97,13 @@ type ScannerConfig struct {
 	// system files. Leave empty (default) to disable the allowlist and
 	// report all hash matches regardless of file location.
 	HashAllowlistPaths []string `yaml:"hash_allowlist_paths" mapstructure:"hash_allowlist_paths"`
+	// ScanIgnoreFilePatterns is a list of glob patterns matching filenames
+	// to exclude from scanning. Inspired by Maldet's scan_ignore directive.
+	// Patterns are matched against filepath.Base(path) using filepath.Match.
+	// Extension shorthand: ".log" is auto-normalized to "*.log".
+	// If non-empty, this list replaces defaults entirely (not merged).
+	// Leave empty to use built-in AV-informed defaults.
+	ScanIgnoreFilePatterns []string `yaml:"scan_ignore_file_patterns" mapstructure:"scan_ignore_file_patterns"`
 }
 
 // SchedulerConfig holds scheduling settings for updates and scans.
@@ -198,7 +205,7 @@ func setDefaultConfig(config *Config) {
 	config.Scanner.MinFilesize = 0
 	config.Scanner.MaxFilesize = "20M"
 	config.Scanner.MaxDepth = 0
-	config.Scanner.HexDepth = 262144 // Maldet default: 256KB covers ~98.9% of hex patterns
+	config.Scanner.HexDepth = 262144
 	config.Scanner.CPULimit = 0
 	config.Scanner.ConcurrencyLimit = 192
 
@@ -209,6 +216,32 @@ func setDefaultConfig(config *Config) {
 	config.Scanner.IncludeRegex = ""
 	config.Scanner.ExcludeRegex = ""
 	config.Scanner.HashAllowlistPaths = []string{}
+	config.Scanner.ScanIgnoreFilePatterns = []string{
+		// Archives
+		".tar", ".gz", ".bz2", ".7z", ".rar", ".arj", ".cab", ".iso",
+		// Documents
+		".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods",
+		// Audio
+		".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",
+		// Video
+		".mp4", ".avi", ".mov", ".mkv", ".webm", ".wmv", ".flv",
+		// Images
+		".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico",
+		// Database
+		".db", ".sqlite", ".sqlite3", ".mdb", ".accdb", ".mdf", ".ldf", ".ndf",
+		// VM/Disk
+		".vmdk", ".vdi", ".vhd", ".vhdx", ".qcow2", ".img", ".dmg",
+		// Editor/System Artifacts
+		".swp", ".swo", ".lock", ".pid",
+		// Logs
+		".log", ".journal",
+		// Cache/Temp
+		".cache", ".tmp", ".temp",
+		// Office Temp Lock Files
+		"~$*",
+		// Exchange
+		".edb", ".chk",
+	}
 
 	config.Scheduler.UpdateInterval = "@daily"
 	config.Scheduler.ScanInterval = "@every 4h"

@@ -21,6 +21,7 @@ type Walker struct {
 	parsedMaxFilesize int64
 	includeRegex      *regexp.Regexp
 	excludeRegex      *regexp.Regexp
+	scanIgnore        []string // normalized glob patterns for file exclusion
 }
 
 // NewWalker creates a new file system walker with the given configuration.
@@ -58,7 +59,39 @@ func NewWalker(cfg *config.Config) (*Walker, error) {
 		w.excludeRegex = r
 	}
 
+	// Normalize scan_ignore_file_patterns: extension shorthand ".ext" → "*.ext"
+	w.scanIgnore = normalizeScanIgnorePatterns(cfg.Scanner.ScanIgnoreFilePatterns)
+
 	return w, nil
+}
+
+// normalizeScanIgnorePatterns expands extension shorthand patterns into
+// full globs. Bare extensions like ".log" become "*.log". Patterns that
+// already contain glob characters are passed through unchanged.
+func normalizeScanIgnorePatterns(patterns []string) []string {
+	if len(patterns) == 0 {
+		return nil
+	}
+
+	result := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+
+		// Bare extension: starts with "." and contains no glob chars
+		if strings.HasPrefix(p, ".") && !strings.ContainsAny(p, "*?[\\") {
+			result = append(result, "*"+p)
+		} else {
+			result = append(result, p)
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 // Walk traverses the file system from the given root and calls the provided function for each matching file.
@@ -193,6 +226,17 @@ func (w *Walker) ApplyFilters(ctx context.Context, path string, info os.FileInfo
 	// Apply ignore_root, ignore_user, ignore_group filters (Unix only; no-op on Windows)
 	if applyOwnerFilters(path, info, w.cfg) {
 		return nil
+	}
+
+	// Apply scan_ignore file pattern exclusion (filename-only matching)
+	if len(w.scanIgnore) > 0 {
+		baseName := filepath.Base(path)
+		for _, pattern := range w.scanIgnore {
+			if matched, _ := filepath.Match(pattern, baseName); matched {
+				log.Debug("Skipping file (scan_ignore)", "path", path, "pattern", pattern)
+				return nil
+			}
+		}
 	}
 
 	// Apply regex filters

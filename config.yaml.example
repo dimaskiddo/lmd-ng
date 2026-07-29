@@ -56,15 +56,95 @@ scanner:
   min_filesize: 0
   max_filesize: 20M
   max_depth: 0
-  hex_depth: 262144                    # Maldet default: 256KB (~98.9% pattern coverage)
+  hex_depth: 262144                   # Maldet default: 256KB (~98.9% pattern coverage)
   cpu_limit: 0                        # 0 = auto-detect (uses all CPU cores)
-  concurrency_limit: 192             # Max concurrent DBS scan requests (DBS client path)
+  concurrency_limit: 192              # Max concurrent DBS scan requests (DBS client path)
   ignore_root: false
   ignore_users: []
   ignore_groups: []
   include_regex: ""
   exclude_regex: ""
   hash_allowlist_paths: []            # Suppress MD5/SHA256 detections under these path prefixes
+  scan_ignore_file_patterns:          # Glob patterns for filename exclusion (empty = defaults below)
+    # Extension shorthand: ".log" auto-expands to "*.log"
+    # --- Archives ---
+    - ".tar"
+    - ".gz"
+    - ".bz2"
+    - ".7z"
+    - ".rar"
+    - ".arj"
+    - ".cab"
+    - ".iso"
+    # --- Documents ---
+    - ".pdf"
+    - ".doc"
+    - ".docx"
+    - ".xls"
+    - ".xlsx"
+    - ".ppt"
+    - ".pptx"
+    - ".odt"
+    - ".ods"
+    # --- Audio ---
+    - ".mp3"
+    - ".wav"
+    - ".flac"
+    - ".aac"
+    - ".ogg"
+    - ".wma"
+    - ".m4a"
+    # --- Video ---
+    - ".mp4"
+    - ".avi"
+    - ".mov"
+    - ".mkv"
+    - ".webm"
+    - ".wmv"
+    - ".flv"
+    # --- Images ---
+    - ".jpg"
+    - ".jpeg"
+    - ".png"
+    - ".gif"
+    - ".bmp"
+    - ".svg"
+    - ".webp"
+    - ".ico"
+    # --- Database ---
+    - ".db"
+    - ".sqlite"
+    - ".sqlite3"
+    - ".mdb"
+    - ".accdb"
+    - ".mdf"
+    - ".ldf"
+    - ".ndf"
+    # --- VM/Disk ---
+    - ".vmdk"
+    - ".vdi"
+    - ".vhd"
+    - ".vhdx"
+    - ".qcow2"
+    - ".img"
+    - ".dmg"
+    # --- Editor/System Artifacts ---
+    - ".swp"
+    - ".swo"
+    - ".lock"
+    - ".pid"
+    # --- Logs ---
+    - ".log"
+    - ".journal"
+    # --- Cache/Temp ---
+    - ".cache"
+    - ".tmp"
+    - ".temp"
+    # --- Office Temp Lock Files ---
+    - "~$*"
+    # --- Exchange ---
+    - ".edb"
+    - ".chk"
 
 scheduler:
   update_interval: "@daily"
