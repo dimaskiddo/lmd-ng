@@ -104,8 +104,15 @@ func (om *otherMonitor) handleEvent(ctx context.Context, name string, op fsnotif
 		return
 	}
 
-	// If a new directory is created, add it to the watcher recursively
+	// Stat early — needed for directory check AND orphan inode check
 	info, statErr := os.Lstat(name)
+
+	// Exclude orphan inodes and system temp artifacts (#* in /tmp, /var/tmp)
+	if statErr == nil && util.IsOrphanTempFile(name, info) {
+		return
+	}
+
+	// If a new directory is created, add it to the watcher recursively
 	if statErr == nil && info.IsDir() {
 		if op&fsnotify.Create != 0 {
 			log.Info("New directory created, adding to monitor", "path", name, "backend", "fsnotify")

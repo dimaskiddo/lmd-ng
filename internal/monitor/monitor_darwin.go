@@ -93,8 +93,15 @@ func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fse
 		return
 	}
 
-	// Skip directory events — we only scan files
+	// Stat early — needed for directory check AND orphan inode check
 	info, statErr := os.Lstat(path)
+
+	// Exclude orphan inodes and system temp artifacts (#* in /tmp, /var/tmp)
+	if statErr == nil && util.IsOrphanTempFile(path, info) {
+		return
+	}
+
+	// Skip directory events — we only scan files
 	if statErr == nil && info.IsDir() {
 		return
 	}

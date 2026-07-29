@@ -239,6 +239,12 @@ func (w *Walker) ApplyFilters(ctx context.Context, path string, info os.FileInfo
 		}
 	}
 
+	// Skip orphan inodes and system temp artifacts
+	if util.IsOrphanTempFile(path, info) {
+		log.Debug("Skipping orphan/temp file", "path", path)
+		return nil
+	}
+
 	// Apply regex filters
 	if w.excludeRegex != nil && w.excludeRegex.MatchString(path) {
 		log.Debug("Skipping file due to exclude_regex", "path", path, "regex", w.cfg.Scanner.ExcludeRegex)
