@@ -35,7 +35,7 @@ func TestNDBMatchTargetTypeFiltering(t *testing.T) {
 	// Add a Win.Trojan sig (TargetType=1/PE) with a simple pattern that is
 	// present in both our "PE" and "ELF" test buffers below.
 	pattern := "deadbeef"
-	sig, err := compileNDBSignature("Win.Trojan.TestOnly", NDBTargetPE, "*", pattern)
+	sig, err := compileNDBSignature("Win.Trojan.TestOnly", NDBTargetPE, "*", pattern, -1, -1)
 	if err != nil {
 		t.Fatalf("compileNDBSignature failed: %v", err)
 	}

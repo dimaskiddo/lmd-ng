@@ -33,7 +33,18 @@ const (
 	NDBTargetASCII = 7
 	// NDBTargetMachO matches Mach-O executables (macOS/iOS).
 	NDBTargetMachO = 9
+	// NDBTargetPDF matches PDF documents (FLEVEL >= 74, ClamAV >= 0.98.0).
+	NDBTargetPDF = 10
+	// NDBTargetFlash matches SWF/Flash files (FLEVEL >= 74, ClamAV >= 0.98.0).
+	NDBTargetFlash = 11
+	// NDBTargetJava matches Java class files (FLEVEL >= 74, ClamAV >= 0.98.0).
+	NDBTargetJava = 12
 )
+
+// ClamAVFLevel is the functionality level of this pure-Go engine.
+// Matches ClamAV 1.6.0 (current latest). Signatures with MinFL > this value
+// require features not implemented here and are skipped.
+const ClamAVFLevel = 240
 
 // Magic byte sequences used to detect file type for NDB TargetType filtering.
 var (
@@ -97,6 +108,8 @@ type NDBSignature struct {
 	Pattern    *regexp.Regexp // Compiled regex from hex pattern (for complex patterns)
 	FixedBytes []byte         // Direct byte pattern for simple fixed-hex signatures (no wildcards)
 	IsFixed    bool           // True if the pattern is a simple fixed-byte pattern (no wildcards)
+	MinFL      int            // Minimum FLEVEL required (0 = any). Signatures with MinFL > engine FLevel are skipped.
+	MaxFL      int            // Maximum FLEVEL allowed (0 = no maximum). Signatures with MaxFL < engine FLevel are skipped.
 }
 
 // NDBStore holds all loaded NDB body signatures.
@@ -167,7 +180,21 @@ func (s *NDBStore) LoadNDB(r io.Reader, sourceName string) error {
 			continue
 		}
 
-		sig, err := compileNDBSignature(name, targetType, offset, hexSig)
+		// Parse optional FLEVEL range (MinFL and MaxFL) from fields 4 and 5.
+		// Both are required if either is present. -1 means not specified.
+		var minFL, maxFL int = -1, -1
+		if len(parts) >= 5 {
+			if v, err := strconv.Atoi(strings.TrimSpace(parts[4])); err == nil {
+				minFL = v
+			}
+		}
+		if len(parts) >= 6 {
+			if v, err := strconv.Atoi(strings.TrimSpace(parts[5])); err == nil {
+				maxFL = v
+			}
+		}
+
+		sig, err := compileNDBSignature(name, targetType, offset, hexSig, minFL, maxFL)
 		if err != nil {
 			slog.Debug("Failed to compile NDB signature, skipping", "source", sourceName, "line", lineNum, "name", name, "error", err)
 			skipped++
@@ -205,6 +232,16 @@ func (s *NDBStore) Match(content []byte, fileSize int64) []string {
 	detectedType := detectFileType(content)
 
 	for _, sig := range s.Signatures {
+		// --- FLEVEL filter ---
+		// Skip signatures that require a higher functionality level than this engine
+		// provides, or that were superseded in newer functionality levels.
+		if sig.MinFL >= 0 && ClamAVFLevel < sig.MinFL {
+			continue
+		}
+		if sig.MaxFL >= 0 && ClamAVFLevel > sig.MaxFL {
+			continue
+		}
+
 		// --- TargetType filter ---
 		// A signature with TargetType == NDBTargetAny (0) matches all files.
 		if sig.TargetType != NDBTargetAny {
@@ -215,20 +252,31 @@ func (s *NDBStore) Match(content []byte, fileSize int64) []string {
 				}
 			} else {
 				// We couldn't detect the file type (it's generic, like a .pb or .txt).
-				// However, if the signature expects a format we CAN robustly detect
-				// (PE, ELF, Mach-O, OLE2), we can safely skip the signature, because
-				// if the file actually were that format, we would have detected it.
+				// If the signature targets a format we robustly detect (PE, ELF, Mach-O,
+				// OLE2) or can conservatively filter (PDF, Flash, Java), skip it —
+				// if the file were actually that format, we would have detected it.
+				// Formats we cannot detect (HTML, Mail, Graphics, ASCII) are allowed
+				// through: the file may genuinely be that type.
 				if sig.TargetType == NDBTargetPE ||
 					sig.TargetType == NDBTargetELF ||
 					sig.TargetType == NDBTargetMachO ||
-					sig.TargetType == NDBTargetOLE2 {
+					sig.TargetType == NDBTargetOLE2 ||
+					sig.TargetType == NDBTargetPDF ||
+					sig.TargetType == NDBTargetFlash ||
+					sig.TargetType == NDBTargetJava {
 					continue
 				}
 			}
 		}
 
-		// Determine the slice of content to search based on offset
-		searchContent := resolveOffsetContent(content, sig.Offset, fileSize)
+		// Determine the slice of content to search based on offset.
+		// Use actual pattern length for fixed patterns; regex falls back to 256.
+		minWindow := 256
+		if sig.IsFixed {
+			minWindow = len(sig.FixedBytes)
+		}
+
+		searchContent := resolveOffsetContent(content, sig.Offset, fileSize, minWindow)
 		if searchContent == nil {
 			continue
 		}
@@ -250,7 +298,9 @@ func (s *NDBStore) Match(content []byte, fileSize int64) []string {
 }
 
 // resolveOffsetContent returns the subset of content to search based on the ClamAV offset spec.
-func resolveOffsetContent(content []byte, offset string, fileSize int64) []byte {
+// minWindow is the minimum search window size for floating offsets — derived from the
+// actual pattern length when known (fixed patterns), or a safe default (256) for regex.
+func resolveOffsetContent(content []byte, offset string, fileSize int64, minWindow int) []byte {
 	if len(content) == 0 {
 		return nil
 	}
@@ -276,7 +326,7 @@ func resolveOffsetContent(content []byte, offset string, fileSize int64) []byte 
 		}
 
 		start := base
-		end := base + maxShift + 256
+		end := base + maxShift + int64(minWindow)
 
 		if start >= int64(len(content)) {
 			return nil
@@ -306,10 +356,10 @@ func resolveOffsetContent(content []byte, offset string, fileSize int64) []byte 
 		return content[start:]
 	}
 
-	// Handle PE/ELF specific offsets — skip for now as we don't parse those structures.
-	// EP+n, EP-n, Sx+n, SEx, SL+n are all PE/ELF specific.
+	// Handle PE/ELF specific offsets — structural offsets (EP, Sx, SE, SL) require
+	// PE/ELF header parsing. Fall back to full-content search: this can cause false
+	// positives (pattern matches in wrong location) but never causes missed detections.
 	if strings.HasPrefix(offset, "EP") || strings.HasPrefix(offset, "S") {
-		// Fall back to full content search for PE/ELF offsets
 		return content
 	}
 
@@ -326,13 +376,15 @@ func resolveOffsetContent(content []byte, offset string, fileSize int64) []byte 
 	return content[n:]
 }
 
-// compileNDBSignature compiles a ClamAV hex pattern string into a NDBSignature.
-func compileNDBSignature(name string, targetType int, offset, hexSig string) (*NDBSignature, error) {
+// compileNDBSignature compiles a ClamAV hex pattern string into an NDBSignature.
+func compileNDBSignature(name string, targetType int, offset, hexSig string, minFL, maxFL int) (*NDBSignature, error) {
 	sig := &NDBSignature{
 		Name:       name,
 		TargetType: targetType,
 		Offset:     offset,
 		RawHex:     hexSig,
+		MinFL:      minFL,
+		MaxFL:      maxFL,
 	}
 
 	// Check if this is a simple fixed hex pattern (no wildcards or special chars)
@@ -471,7 +523,7 @@ func clamHexToRegex(hexSig string) (string, error) {
 			}
 			i += 2
 
-		// Handle '!' (negation) — not yet supported; return error to avoid false positives
+		// Handle '!' (negation) — not yet supported; skip signature to avoid false positives
 		case c == '!':
 			return "", fmt.Errorf("negation operator '!' not supported in hex patterns at position %d", i)
 
@@ -548,7 +600,7 @@ func compileByteRange(content string) (string, error) {
 	}
 
 	if strings.HasSuffix(content, "-") {
-		// {n-}: n or more bytes (capped at n+4096 to avoid catastrophic backtracking)
+		// {n-}: n or more bytes (capped at n+65536 to bound regex backtracking cost)
 		nStr := content[:len(content)-1]
 
 		n, err := strconv.Atoi(nStr)
@@ -556,7 +608,7 @@ func compileByteRange(content string) (string, error) {
 			return "", fmt.Errorf("invalid range lower bound '%s': %w", nStr, err)
 		}
 
-		maxCap := n + 4096
+		maxCap := n + 65536
 
 		return fmt.Sprintf("[\\x00-\\xff]{%d,%d}", n, maxCap), nil
 	}

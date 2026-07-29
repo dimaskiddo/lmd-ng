@@ -72,7 +72,8 @@ func (s *MDBStore) lookupEntry(m map[string]MDBEntry, hash string, sectionSize i
 		return MDBEntry{}, false
 	}
 
-	if entry.SectionSize != sectionSize {
+	// Check section size if the signature specifies one (-1 = wildcard, matches any size)
+	if entry.SectionSize >= 0 && entry.SectionSize != sectionSize {
 		return MDBEntry{}, false
 	}
 
@@ -131,11 +132,16 @@ func (s *MDBStore) LoadMDB(r io.Reader, sourceName string) error {
 			continue
 		}
 
-		sectionSize, err := strconv.ParseInt(sizeStr, 10, 64)
-		if err != nil {
-			slog.Debug("Invalid section size in MDB signature, skipping", "source", sourceName, "line", lineNum, "size", sizeStr)
-			skipped++
-			continue
+		// Parse section size; "*" or empty means any size (wildcard, -1 sentinel)
+		var sectionSize int64 = -1
+		if sizeStr != "*" && sizeStr != "" {
+			var err error
+			sectionSize, err = strconv.ParseInt(sizeStr, 10, 64)
+			if err != nil {
+				slog.Debug("Invalid section size in MDB signature, skipping", "source", sourceName, "line", lineNum, "size", sizeStr)
+				skipped++
+				continue
+			}
 		}
 
 		entry := MDBEntry{

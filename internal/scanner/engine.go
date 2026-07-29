@@ -78,10 +78,11 @@ func NewLMDSignatureScanner(cfg *config.Config) (*LMDSignatureScanner, error) {
 
 // Scan implements the SignatureEngine interface for LMDSignatureScanner.
 func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error) {
-	// --- Hash Scanning (MD5 + SHA256) ---
+	// --- Hash Scanning (MD5 + SHA1 + SHA256) ---
 	md5Hasher := md5.New()
+	sha1Hasher := sha1.New()
 	sha256Hasher := sha256.New()
-	multiWriter := io.MultiWriter(md5Hasher, sha256Hasher)
+	multiWriter := io.MultiWriter(md5Hasher, sha1Hasher, sha256Hasher)
 
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("failed to seek reader to start for hash: %w", err)
@@ -93,6 +94,7 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 	}
 
 	md5Hash := hex.EncodeToString(md5Hasher.Sum(nil))
+	sha1Hash := hex.EncodeToString(sha1Hasher.Sum(nil))
 	sha256Hash := hex.EncodeToString(sha256Hasher.Sum(nil))
 
 	if sigName := s.md5Scanner.Check(md5Hash, filePath); sigName != "" {
@@ -135,6 +137,15 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 				SignatureType: "RFXN-MD5",
 				FilePath:      filePath,
 				DetectionID:   fmt.Sprintf("rfxn.md5.%s", md5Hash),
+			}}, nil
+		}
+
+		if entry, found := s.clamavScanner.HDB.LookupSHA1(sha1Hash, fileSize); found {
+			return []*ScanResult{{
+				SignatureName: entry.Name,
+				SignatureType: "RFXN-SHA1",
+				FilePath:      filePath,
+				DetectionID:   fmt.Sprintf("rfxn.sha1.%s", sha1Hash),
 			}}, nil
 		}
 

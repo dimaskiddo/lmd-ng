@@ -20,12 +20,13 @@ const (
 
 // PESection represents a parsed PE section with its hashes.
 type PESection struct {
-	Name   string // Section name (e.g., ".text", ".data")
-	Size   int64  // Raw data size (SizeOfRawData)
-	Offset int64  // File offset to section data (PointerToRawData)
-	MD5    string // MD5 hash of section data
-	SHA1   string // SHA1 hash of section data
-	SHA256 string // SHA256 hash of section data
+	Name        string // Section name (e.g., ".text", ".data")
+	Size        int64  // Raw data size (SizeOfRawData)
+	Offset      int64  // File offset to section data (PointerToRawData)
+	VirtualSize int64  // Virtual memory size (used for zero-fill when SizeOfRawData==0)
+	MD5         string // MD5 hash of section data
+	SHA1        string // SHA1 hash of section data
+	SHA256      string // SHA256 hash of section data
 }
 
 // ParsePESections reads a PE file from the given reader and returns section
@@ -168,16 +169,45 @@ func parseSectionHeader(r io.ReadSeeker, offset int64) (PESection, error) {
 	}
 
 	return PESection{
-		Name:   name,
-		Size:   int64(sizeOfRawData),
-		Offset: int64(pointerToRawData),
+		Name:        name,
+		Size:        int64(sizeOfRawData),
+		Offset:      int64(pointerToRawData),
+		VirtualSize: int64(virtualSize),
 	}, nil
 }
 
+// zeroReader is an io.Reader that always returns zero bytes.
+// Used to hash PE sections with SizeOfRawData==0 (e.g., .bss).
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
 // hashSection reads the section data from the file and computes MD5, SHA1, and SHA256.
+// When SizeOfRawData is 0 but VirtualSize > 0 (e.g., .bss sections), hashes
+// zero-bytes up to VirtualSize — matching ClamAV C engine behavior.
 func hashSection(r io.ReadSeeker, section *PESection) error {
-	if section.Offset == 0 || section.Size == 0 {
-		return nil // Empty section, no data to hash
+	// No file data at all — skip
+	if section.Offset == 0 && section.Size == 0 {
+		if section.VirtualSize > 0 {
+			// .bss-like section: hash zero-bytes up to VirtualSize, capped at 128MB
+			zeroSize := section.VirtualSize
+			if zeroSize > 128*1024*1024 {
+				zeroSize = 128 * 1024 * 1024
+			}
+
+			hashZeroSection(section, zeroSize)
+		}
+
+		return nil
+	}
+
+	if section.Offset == 0 {
+		return nil
 	}
 
 	if _, err := r.Seek(section.Offset, io.SeekStart); err != nil {
@@ -204,6 +234,21 @@ func hashSection(r io.ReadSeeker, section *PESection) error {
 	section.SHA256 = hashToHex(sha256Hasher)
 
 	return nil
+}
+
+// hashZeroSection hashes zero-bytes of the given size and stores the results
+// in the PESection's hash fields.
+func hashZeroSection(section *PESection, size int64) {
+	md5Hasher := md5.New()
+	sha1Hasher := sha1.New()
+	sha256Hasher := sha256.New()
+
+	multiWriter := io.MultiWriter(md5Hasher, sha1Hasher, sha256Hasher)
+	io.CopyN(multiWriter, zeroReader{}, size)
+
+	section.MD5 = hashToHex(md5Hasher)
+	section.SHA1 = hashToHex(sha1Hasher)
+	section.SHA256 = hashToHex(sha256Hasher)
 }
 
 // hashToHex converts a hash.Hash to a lowercase hex string.
