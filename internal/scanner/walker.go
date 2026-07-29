@@ -239,9 +239,8 @@ func (w *Walker) ApplyFilters(ctx context.Context, path string, info os.FileInfo
 		}
 	}
 
-	// Skip orphan inodes and system temp artifacts
+	// Skip orphan inodes and system temp artifacts (silent — these are noise)
 	if util.IsOrphanTempFile(path, info) {
-		log.Debug("Skipping orphan/temp file", "path", path)
 		return nil
 	}
 

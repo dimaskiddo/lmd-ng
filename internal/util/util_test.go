@@ -106,3 +106,44 @@ func TestIsOrphanTempFile_HashOutsideTmp(t *testing.T) {
 		t.Error("expected # file outside /tmp to NOT be orphan temp (evasion guard)")
 	}
 }
+
+func TestIsOrphanTempPath_HashInTmp(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("requires /tmp on Unix")
+	}
+
+	tmpFile := filepath.Join(os.TempDir(), "#test-orphanpath-sentinel")
+	os.Remove(tmpFile)
+	if err := os.WriteFile(tmpFile, []byte("x"), 0644); err != nil {
+		t.Skip("cannot write to system /tmp")
+	}
+	defer os.Remove(tmpFile)
+
+	if !IsOrphanTempPath(tmpFile) {
+		t.Errorf("expected # file in %s to be detected by path check", os.TempDir())
+	}
+}
+
+func TestIsOrphanTempPath_NoHashPrefix(t *testing.T) {
+	dir := t.TempDir()
+	regular := filepath.Join(dir, "legit.txt")
+	if IsOrphanTempPath(regular) {
+		t.Error("regular file without # prefix should not match")
+	}
+}
+
+func TestIsOrphanTempPath_HashOutsideTmp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows path logic differs")
+	}
+
+	// Use cwd as parent — definitely not /tmp or /var/tmp
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(cwd, "#outside")
+	if IsOrphanTempPath(outside) {
+		t.Error("# file outside /tmp should not match")
+	}
+}

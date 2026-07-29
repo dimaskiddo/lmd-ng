@@ -79,8 +79,6 @@ func (dm *darwinMonitor) isExcluded(eventPath string) bool {
 
 // handleEvent processes a single FSEvents event.
 func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fsevents.EventFlags) {
-	log.Debug("Monitor event received", "path", path, "flags", fmt.Sprintf("0x%x", flags))
-
 	// Exclude quarantine artifacts and temp files
 	if quarantine.IsQuarantineArtifact(path) {
 		return
@@ -93,13 +91,21 @@ func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fse
 		return
 	}
 
+	// Exclude #* temp-file artifacts early — path-based, stat-free (race-safe)
+	if util.IsOrphanTempPath(path) {
+		return
+	}
+
 	// Stat early — needed for directory check AND orphan inode check
 	info, statErr := os.Lstat(path)
 
-	// Exclude orphan inodes and system temp artifacts (#* in /tmp, /var/tmp)
+	// Exclude orphan inodes (Nlink == 0) — needs stat
 	if statErr == nil && util.IsOrphanTempFile(path, info) {
 		return
 	}
+
+	// Log only events that survive all exclusion filters
+	log.Debug("Monitor event received", "path", path, "flags", fmt.Sprintf("0x%x", flags))
 
 	// Skip directory events — we only scan files
 	if statErr == nil && info.IsDir() {

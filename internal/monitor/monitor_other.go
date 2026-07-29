@@ -104,10 +104,15 @@ func (om *otherMonitor) handleEvent(ctx context.Context, name string, op fsnotif
 		return
 	}
 
+	// Exclude #* temp-file artifacts early — path-based, stat-free (race-safe)
+	if util.IsOrphanTempPath(name) {
+		return
+	}
+
 	// Stat early — needed for directory check AND orphan inode check
 	info, statErr := os.Lstat(name)
 
-	// Exclude orphan inodes and system temp artifacts (#* in /tmp, /var/tmp)
+	// Exclude orphan inodes (Nlink == 0) — needs stat
 	if statErr == nil && util.IsOrphanTempFile(name, info) {
 		return
 	}
