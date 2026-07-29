@@ -300,6 +300,11 @@ func hexWildcardMatch(content []byte, sig *hexSignatureEntry) bool {
 	}
 }
 
+// Count returns the number of loaded HEX signatures.
+func (s *hexScanner) Count() int {
+	return len(s.signatures)
+}
+
 // Check searches the given content for any loaded hex signatures and returns their names.
 //
 // False-positive guard: if the file's content begins with a native-executable

@@ -389,3 +389,31 @@ func (c *Client) SendReload(ctx context.Context) error {
 	log.Info("DBS signature reload completed successfully")
 	return nil
 }
+
+// Status requests engine statistics from the DBS server and returns them.
+func (c *Client) Status(ctx context.Context) (*protocol.StatusData, error) {
+	conn, err := c.dial(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial DBS for status: %w", err)
+	}
+	defer conn.Close()
+
+	if err := protocol.WriteFrame(conn, protocol.MsgStatusRequest, nil); err != nil {
+		return nil, fmt.Errorf("failed to send status request: %w", err)
+	}
+
+	msgType, payload, err := protocol.ReadFrame(conn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read status response: %w", err)
+	}
+
+	if msgType == protocol.MsgError {
+		return nil, fmt.Errorf("DBS status request failed: %s", string(payload))
+	}
+
+	if msgType != protocol.MsgStatusResponse {
+		return nil, fmt.Errorf("unexpected response to status request: 0x%02x", msgType)
+	}
+
+	return protocol.DecodeStatusData(payload)
+}

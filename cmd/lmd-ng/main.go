@@ -136,6 +136,7 @@ func main() {
 	rootCmd.AddCommand(updateCmd())
 	rootCmd.AddCommand(serviceCmd())
 	rootCmd.AddCommand(quarantineCmd())
+	rootCmd.AddCommand(statusCmd())
 	rootCmd.AddCommand(versionCmd())
 
 	// Use slog.Default() here (not internal/log) because the internal logger

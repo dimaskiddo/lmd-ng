@@ -86,7 +86,7 @@ func (u *Updater) Update(ctx context.Context) error {
 // updateLMDSignatures handles downloading, verifying, and extracting new LMD signatures.
 // Returns true if signatures were actually updated.
 func (u *Updater) updateLMDSignatures(ctx context.Context) (bool, error) {
-	currentVer, err := u.getCurrentLMDVersion()
+	currentVer, err := u.CurrentLMDVersion()
 	if err != nil {
 		log.Warn("Could not determine current LMD signature version", "error", err)
 		currentVer = "0" // Treat as no version if error
@@ -278,8 +278,8 @@ func (u *Updater) downloadClamAVDatabase(ctx context.Context, url, localPath, cl
 	return true, nil
 }
 
-// getCurrentLMDVersion reads the local LMD signature version file.
-func (u *Updater) getCurrentLMDVersion() (string, error) {
+// CurrentLMDVersion reads the local LMD signature version file.
+func (u *Updater) CurrentLMDVersion() (string, error) {
 	sigDirPath := u.cfg.App.SignaturesDir
 
 	versionFilePath := filepath.Join(sigDirPath, filepath.Base(u.cfg.Updater.SignatureVersionURL))
@@ -290,6 +290,20 @@ func (u *Updater) getCurrentLMDVersion() (string, error) {
 	}
 
 	return strings.TrimSpace(string(data)), nil
+}
+
+// LastUpdateTime returns the modification time of the local version file.
+// Returns zero time if the file does not exist.
+func (u *Updater) LastUpdateTime() time.Time {
+	sigDirPath := u.cfg.App.SignaturesDir
+	versionFilePath := filepath.Join(sigDirPath, filepath.Base(u.cfg.Updater.SignatureVersionURL))
+
+	info, err := os.Stat(versionFilePath)
+	if err != nil {
+		return time.Time{}
+	}
+
+	return info.ModTime()
 }
 
 // getRemoteVersion fetches the remote version string from a URL.

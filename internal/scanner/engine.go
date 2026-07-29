@@ -246,6 +246,38 @@ func (s *LMDSignatureScanner) Name() string {
 	return "LMD Native Signature Engine"
 }
 
+// MD5Count returns the number of loaded MD5 hash signatures.
+func (s *LMDSignatureScanner) MD5Count() int {
+	if s.md5Scanner == nil {
+		return 0
+	}
+	return s.md5Scanner.Count()
+}
+
+// SHA256Count returns the number of loaded SHA256 hash signatures.
+func (s *LMDSignatureScanner) SHA256Count() int {
+	if s.sha256Scanner == nil {
+		return 0
+	}
+	return s.sha256Scanner.Count()
+}
+
+// HEXCount returns the number of loaded HEX pattern signatures.
+func (s *LMDSignatureScanner) HEXCount() int {
+	if s.hexScanner == nil {
+		return 0
+	}
+	return s.hexScanner.Count()
+}
+
+// RFXNCount returns the total number of RFXN ClamAV signatures (NDB + HDB + MDB).
+func (s *LMDSignatureScanner) RFXNCount() int {
+	if s.clamavScanner == nil {
+		return 0
+	}
+	return s.clamavScanner.TotalSignatures()
+}
+
 // isPathAllowlisted returns true if filePath starts with any configured
 // HashAllowlistPaths prefix. Used to suppress hash-based detections for
 // known-good system paths (e.g. /usr/bin, /usr/lib).
@@ -447,4 +479,49 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 // Name returns the name of the ClamAV signature engine.
 func (s *ClamAVSignatureEngine) Name() string {
 	return "ClamAV Signature Engine"
+}
+
+// HDBCount returns the number of HDB (file hash) signatures.
+func (s *ClamAVSignatureEngine) HDBCount() int {
+	if s.db == nil {
+		return 0
+	}
+	return s.db.HDB.TotalCount()
+}
+
+// NDBCount returns the number of NDB (body pattern) signatures.
+func (s *ClamAVSignatureEngine) NDBCount() int {
+	if s.db == nil {
+		return 0
+	}
+	return s.db.NDB.TotalCount()
+}
+
+// MDBCount returns the number of MDB (PE section hash) signatures.
+func (s *ClamAVSignatureEngine) MDBCount() int {
+	if s.db == nil {
+		return 0
+	}
+	return s.db.MDB.TotalCount()
+}
+
+// TotalSignatures returns the total signature count across all store types.
+func (s *ClamAVSignatureEngine) TotalSignatures() int {
+	if s.db == nil {
+		return 0
+	}
+	return s.db.TotalSignatures()
+}
+
+// CVDVersions returns the CVD database versions keyed by filename (e.g. "main.cvd" → 62).
+func (s *ClamAVSignatureEngine) CVDVersions() map[string]int {
+	if s.db == nil || len(s.db.CVDVersions) == 0 {
+		return nil
+	}
+
+	versions := make(map[string]int, len(s.db.CVDVersions))
+	for name, hdr := range s.db.CVDVersions {
+		versions[name] = hdr.Version
+	}
+	return versions
 }

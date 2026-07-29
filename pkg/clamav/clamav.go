@@ -28,23 +28,34 @@ type CVDHeader struct {
 // ClamAVSignatureDB represents the complete in-memory database of ClamAV signatures
 // loaded from one or more CVD/CLD files or flat signature files.
 type ClamAVSignatureDB struct {
-	HDB *HDBStore // File hash signatures (.hdb, .hsb)
-	MDB *MDBStore // PE section hash signatures (.mdb, .msb)
-	NDB *NDBStore // Body/extended signatures (.ndb)
+	HDB         *HDBStore              // File hash signatures (.hdb, .hsb)
+	MDB         *MDBStore              // PE section hash signatures (.mdb, .msb)
+	NDB         *NDBStore              // Body/extended signatures (.ndb)
+	CVDVersions map[string]CVDHeader   // CVD filename -> parsed header metadata
 }
 
 // NewClamAVSignatureDB creates a new empty ClamAVSignatureDB.
 func NewClamAVSignatureDB() *ClamAVSignatureDB {
 	return &ClamAVSignatureDB{
-		HDB: NewHDBStore(),
-		MDB: NewMDBStore(),
-		NDB: NewNDBStore(),
+		HDB:         NewHDBStore(),
+		MDB:         NewMDBStore(),
+		NDB:         NewNDBStore(),
+		CVDVersions: make(map[string]CVDHeader),
 	}
 }
 
 // TotalSignatures returns the total number of signatures loaded across all types.
 func (db *ClamAVSignatureDB) TotalSignatures() int {
 	return db.HDB.TotalCount() + db.MDB.TotalCount() + db.NDB.TotalCount()
+}
+
+// CVDVersion returns the version number for the named CVD/CLD database.
+func (db *ClamAVSignatureDB) CVDVersion(dbName string) (int, bool) {
+	hdr, ok := db.CVDVersions[dbName]
+	if !ok {
+		return 0, false
+	}
+	return hdr.Version, true
 }
 
 // LoadFromDirectory loads all ClamAV signature databases from the given directory.
@@ -159,6 +170,9 @@ func (db *ClamAVSignatureDB) loadCVD(filePath string) error {
 			"sigs", cvdHeader.NumSigs,
 			"flevel", cvdHeader.FLevel,
 			"builder", cvdHeader.Builder)
+
+		// Retain CVD header metadata for status reporting
+		db.CVDVersions[filepath.Base(filePath)] = *cvdHeader
 
 		// Pre-allocate signature stores using known count from header
 		if cvdHeader.NumSigs > 0 {

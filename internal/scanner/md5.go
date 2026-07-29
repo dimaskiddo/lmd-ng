@@ -109,6 +109,11 @@ func (s *md5Scanner) loadSignatures(filePath string) error {
 	return nil
 }
 
+// Count returns the number of loaded MD5 signatures.
+func (s *md5Scanner) Count() int {
+	return len(s.signatures)
+}
+
 // Check returns the signature name if the MD5 hash matches a known signature.
 //
 // System-path allowlist guard: if filePath starts with any configured

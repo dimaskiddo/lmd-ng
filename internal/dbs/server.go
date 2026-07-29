@@ -168,6 +168,9 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	case protocol.MsgReloadSignatures:
 		s.handleReloadRequest(conn)
 
+	case protocol.MsgStatusRequest:
+		s.handleStatusRequest(conn)
+
 	default:
 		log.Warn("Unknown message type received", "type", msgType)
 		s.sendError(conn, fmt.Sprintf("unknown message type: %d", msgType))
@@ -323,6 +326,49 @@ func (s *Server) handleReloadRequest(conn net.Conn) {
 
 	if err := protocol.WriteFrame(conn, protocol.MsgReloadAck, nil); err != nil {
 		log.Error("Failed to send reload acknowledgment", "error", err)
+	}
+}
+
+// handleStatusRequest aggregates engine statistics and returns them to the client.
+func (s *Server) handleStatusRequest(conn net.Conn) {
+	engines := s.getEngines()
+
+	data := &protocol.StatusData{
+		SignatureCounts: make(map[string]int),
+	}
+
+	for _, engine := range engines {
+		data.EngineNames = append(data.EngineNames, engine.Name())
+
+		switch e := engine.(type) {
+		case *scanner.LMDSignatureScanner:
+			data.SignatureCounts["MD5 Hashes"] = e.MD5Count()
+			data.SignatureCounts["SHA256 Hashes"] = e.SHA256Count()
+			data.SignatureCounts["HEX Patterns"] = e.HEXCount()
+			data.SignatureCounts["RFXN Signatures"] = e.RFXNCount()
+			data.SignatureCounts["Total"] = e.MD5Count() + e.SHA256Count() + e.HEXCount() + e.RFXNCount()
+
+		case *scanner.ClamAVSignatureEngine:
+			data.SignatureCounts["HDB Signatures"] = e.HDBCount()
+			data.SignatureCounts["NDB Signatures"] = e.NDBCount()
+			data.SignatureCounts["MDB Signatures"] = e.MDBCount()
+			data.SignatureCounts["Total"] = e.TotalSignatures()
+
+			if cvdVersions := e.CVDVersions(); len(cvdVersions) > 0 {
+				data.CVDDatabaseVersions = cvdVersions
+			}
+		}
+	}
+
+	payload, err := protocol.EncodeStatusData(data)
+	if err != nil {
+		log.Error("Failed to encode status data", "error", err)
+		s.sendError(conn, "internal server error: failed to encode status")
+		return
+	}
+
+	if err := protocol.WriteFrame(conn, protocol.MsgStatusResponse, payload); err != nil {
+		log.Error("Failed to send status response", "error", err)
 	}
 }
 

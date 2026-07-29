@@ -109,6 +109,11 @@ func (s *sha256Scanner) loadSignatures(filePath string) error {
 	return nil
 }
 
+// Count returns the number of loaded SHA256 signatures.
+func (s *sha256Scanner) Count() int {
+	return len(s.signatures)
+}
+
 // Check returns the signature name if the SHA256 hash matches a known signature.
 //
 // System-path allowlist guard: if filePath starts with any configured

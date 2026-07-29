@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 )
@@ -48,6 +49,14 @@ const (
 	// MsgReloadAck is the server's acknowledgment of a successful reload.
 	// Payload: empty
 	MsgReloadAck byte = 0x09
+
+	// MsgStatusRequest is a status query from client to server.
+	// Payload: empty
+	MsgStatusRequest byte = 0x0A
+
+	// MsgStatusResponse carries the server's status data.
+	// Payload: JSON-encoded StatusData
+	MsgStatusResponse byte = 0x0B
 )
 
 const (
@@ -261,4 +270,25 @@ func readString(data []byte, offset int) (string, int, error) {
 
 	s := string(data[offset : offset+int(strLen)])
 	return s, offset + int(strLen), nil
+}
+
+// StatusData carries engine and signature statistics from the DBS server.
+type StatusData struct {
+	EngineNames       []string        `json:"engine_names"`
+	SignatureCounts   map[string]int  `json:"signature_counts"`
+	CVDDatabaseVersions map[string]int `json:"cvd_database_versions,omitempty"`
+}
+
+// EncodeStatusData serializes StatusData into a JSON payload.
+func EncodeStatusData(data *StatusData) ([]byte, error) {
+	return json.Marshal(data)
+}
+
+// DecodeStatusData deserializes a JSON payload into StatusData.
+func DecodeStatusData(data []byte) (*StatusData, error) {
+	var result StatusData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode status data: %w", err)
+	}
+	return &result, nil
 }
