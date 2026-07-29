@@ -87,7 +87,7 @@ func buildServiceConfig(exePath string, comp Component) *kservice.Config {
 // it returns nil if the legacy service doesn't exist.
 func UninstallLegacyService() error {
 	if err := checkPrivilege(); err != nil {
-		return err
+		return fmt.Errorf("uninstall legacy service: %w", err)
 	}
 
 	svcConfig := &kservice.Config{Name: legacyServiceName}
@@ -125,7 +125,7 @@ func UninstallLegacyService() error {
 // InstallService installs a specific component as an OS-level system service.
 func InstallService(_ *config.Config, comp Component) error {
 	if err := checkPrivilege(); err != nil {
-		return err
+		return fmt.Errorf("install service %s: %w", comp, err)
 	}
 
 	exePath, err := os.Executable()
@@ -150,7 +150,7 @@ func InstallService(_ *config.Config, comp Component) error {
 // UninstallService stops and removes a specific component's system service.
 func UninstallService(_ *config.Config, comp Component) error {
 	if err := checkPrivilege(); err != nil {
-		return err
+		return fmt.Errorf("uninstall service %s: %w", comp, err)
 	}
 
 	svcConfig := &kservice.Config{Name: serviceName(comp)}
@@ -175,7 +175,7 @@ func UninstallService(_ *config.Config, comp Component) error {
 // StartService starts a specific component's system service.
 func StartService(_ *config.Config, comp Component) error {
 	if err := checkPrivilege(); err != nil {
-		return err
+		return fmt.Errorf("start service %s: %w", comp, err)
 	}
 
 	svcConfig := &kservice.Config{Name: serviceName(comp)}
@@ -194,7 +194,7 @@ func StartService(_ *config.Config, comp Component) error {
 // StopService stops a specific component's system service.
 func StopService(_ *config.Config, comp Component) error {
 	if err := checkPrivilege(); err != nil {
-		return err
+		return fmt.Errorf("stop service %s: %w", comp, err)
 	}
 
 	svcConfig := &kservice.Config{Name: serviceName(comp)}
@@ -213,7 +213,7 @@ func StopService(_ *config.Config, comp Component) error {
 // RestartService restarts a specific component's system service.
 func RestartService(_ *config.Config, comp Component) error {
 	if err := checkPrivilege(); err != nil {
-		return err
+		return fmt.Errorf("restart service %s: %w", comp, err)
 	}
 
 	svcConfig := &kservice.Config{Name: serviceName(comp)}

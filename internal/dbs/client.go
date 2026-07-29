@@ -122,7 +122,7 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 func (c *Client) Ping(ctx context.Context) error {
 	conn, err := c.dial(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to dial DBS for ping: %w", err)
 	}
 	defer conn.Close()
 
@@ -271,7 +271,9 @@ func (c *Client) attemptScanFile(ctx context.Context, filePath string, fileSize 
 		if connHealthy {
 			c.releaseConn(conn)
 		} else {
-			conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				log.Debug("Failed to close unhealthy connection", "error", closeErr)
+			}
 		}
 	}()
 
@@ -363,7 +365,7 @@ func (c *Client) attemptScanFile(ctx context.Context, filePath string, fileSize 
 func (c *Client) SendReload(ctx context.Context) error {
 	conn, err := c.dial(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to dial DBS for reload: %w", err)
 	}
 	defer conn.Close()
 

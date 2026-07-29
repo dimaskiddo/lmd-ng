@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/natefinch/lumberjack"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Config holds the logging configuration.

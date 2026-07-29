@@ -234,7 +234,7 @@ func (sc *ScanCoordinator) ScanFile(ctx context.Context, filePath string) ([]*Sc
 
 	fileResults, err := ScanDataWithEngines(ctx, engines, file, filePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("engine scan failed for %s: %w", filePath, err)
 	}
 
 	// Log detections with LOCAL prefix for local fallback scan path

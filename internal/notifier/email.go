@@ -74,8 +74,9 @@ func (n *EmailNotifier) SendQuarantineNotification(filePath, signatureName strin
 		return nil
 	}
 
-	hostname, _ := os.Hostname()
-	if hostname == "" {
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Debug("Failed to get hostname, using fallback", "error", err)
 		hostname = "Unknown"
 	}
 

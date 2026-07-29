@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -24,14 +25,14 @@ import (
 func buildEngines(cfg *config.Config) ([]scanner.SignatureEngine, error) {
 	lmdScanner, err := scanner.NewLMDSignatureScanner(cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create LMD signature scanner: %w", err)
 	}
 	engines := []scanner.SignatureEngine{lmdScanner}
 
 	if cfg.Scanner.ClamAVEnabled {
 		clamEngine, clamErr := scanner.NewClamAVSignatureEngine(cfg)
 		if clamErr != nil {
-			return nil, clamErr
+			return nil, fmt.Errorf("failed to create ClamAV signature engine: %w", clamErr)
 		}
 
 		engines = append(engines, clamEngine)

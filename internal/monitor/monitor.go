@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
@@ -49,7 +50,7 @@ func NewMonitor(cfg *config.Config, scanFunc ScanFunc, n notifier.Notifier) (*Mo
 
 	impl, err := newPlatformMonitor(m)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create platform monitor: %w", err)
 	}
 
 	m.impl = impl

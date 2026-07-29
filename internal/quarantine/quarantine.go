@@ -680,11 +680,11 @@ func moveFile(src, dst string) error {
 
 	var linkErr *os.LinkError
 	if !errors.As(err, &linkErr) {
-		return err
+		return fmt.Errorf("failed to move file %s to %s: %w", src, dst, err)
 	}
 
 	if !errors.Is(linkErr.Err, syscall.EXDEV) {
-		return err
+		return fmt.Errorf("failed to rename file %s to %s: %w", src, dst, err)
 	}
 
 	srcFile, err := os.Open(src)

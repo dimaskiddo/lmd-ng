@@ -142,6 +142,10 @@ func EnsureCerts(cfg *config.Config) error {
 
 	// Parse CA cert for signing
 	caBlock, _ := pem.Decode(caCertPEM)
+	if caBlock == nil {
+		return fmt.Errorf("failed to decode generated CA certificate PEM")
+	}
+
 	caCert, err := x509.ParseCertificate(caBlock.Bytes)
 	if err != nil {
 		return fmt.Errorf("failed to parse generated CA certificate: %w", err)

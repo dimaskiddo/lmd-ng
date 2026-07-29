@@ -177,7 +177,7 @@ func (db *ClamAVSignatureDB) loadCVD(filePath string) error {
 		}
 
 		if err2 := db.extractAndLoadTar(file, filePath); err2 != nil {
-			return fmt.Errorf("failed to extract CVD/CLD file %s (tried gzip and plain tar): gzip error: %v, tar error: %w", filePath, err, err2)
+			return fmt.Errorf("failed to extract CVD/CLD file %s (tried gzip and plain tar): gzip error: %w, tar error: %w", filePath, err, err2)
 		}
 	}
 

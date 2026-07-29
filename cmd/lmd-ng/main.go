@@ -26,6 +26,8 @@ var (
 func main() {
 	var err error
 
+	// Use slog.Default() here (not internal/log) because the structured logger
+	// has not been initialized yet — log.InitLogger is called below.
 	cfgMgr, err = config.NewConfigManager(cfgFile)
 	if err != nil {
 		slog.Default().Error("failed to initialize config manager", "error", err)
@@ -136,6 +138,8 @@ func main() {
 	rootCmd.AddCommand(quarantineCmd())
 	rootCmd.AddCommand(versionCmd())
 
+	// Use slog.Default() here (not internal/log) because the internal logger
+	// may not be active after rootCmd.Execute returns during shutdown.
 	if err := rootCmd.Execute(); err != nil {
 		slog.Default().Error("CLI execution failed", "error", err)
 		os.Exit(1)

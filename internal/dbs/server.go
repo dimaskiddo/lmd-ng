@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -201,7 +202,15 @@ func (s *Server) handleScanRequest(ctx context.Context, conn net.Conn, requestPa
 
 	if req.FileSize > bufferLimit {
 		useTempFile = true
-		tempFile, err = os.CreateTemp("", "lmd-scan-*")
+
+		tmpDir := filepath.Join(s.cfg.App.BasePath, "tmp")
+		if mkdirErr := os.MkdirAll(tmpDir, 0o700); mkdirErr != nil {
+			log.Error("Failed to create temp directory", "path", tmpDir, "error", mkdirErr)
+			s.sendError(conn, "internal server error: temp directory creation failed")
+			return
+		}
+
+		tempFile, err = os.CreateTemp(tmpDir, "lmd-scan-*")
 		if err != nil {
 			log.Error("Failed to create temp file for scan", "error", err)
 			s.sendError(conn, "internal server error: temp file creation failed")
