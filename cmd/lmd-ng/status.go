@@ -34,17 +34,17 @@ func runStatus(cmd *cobra.Command, args []string) {
 	fmt.Println()
 
 	// --- General ---
-	fmt.Printf("  %-15s %s~%s\n", "Version:", version, commit)
+	fmt.Printf("  %-18s %s~%s\n", "Version:", version, commit)
 	configPath := cfgMgr.Viper.ConfigFileUsed()
 	if configPath == "" {
 		configPath = "default (built-in)"
 	}
-	fmt.Printf("  %-15s %s\n", "Config:", configPath)
-	fmt.Printf("  %-15s %s\n", "Base Path:", cfg.App.BasePath)
-	fmt.Printf("  %-15s %s\n", "Log Level:", cfg.Logging.Level)
+	fmt.Printf("  %-18s %s\n", "Config:", configPath)
+	fmt.Printf("  %-18s %s\n", "Base Path:", cfg.App.BasePath)
+	fmt.Printf("  %-18s %s\n", "Log Level:", cfg.Logging.Level)
 	fmt.Println()
 
-	// --- DBS Server ---
+	// --- Database Server ---
 	dbsAddress := dbsServerAddress(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -53,8 +53,8 @@ func runStatus(cmd *cobra.Command, args []string) {
 	dbsClient, clientErr := dbs.NewClient(cfg)
 	if clientErr == nil {
 		if err := dbsClient.Ping(ctx); err == nil {
-			fmt.Printf("  %-15s reachable (%s)\n", "DBS Server:", dbsAddress)
-			fmt.Printf("  %-15s %s\n", "ClamAV Engine:", boolYesNo(cfg.Scanner.ClamAVEnabled))
+			fmt.Printf("  %-18s reachable (%s)\n", "Database Server:", dbsAddress)
+			fmt.Printf("  %-18s %s\n", "ClamAV Engine:", boolYesNo(cfg.Scanner.ClamAVEnabled))
 			fmt.Println()
 
 			// Live engine stats from DBS
@@ -65,14 +65,14 @@ func runStatus(cmd *cobra.Command, args []string) {
 				printSignatureStats(statusData)
 			}
 		} else {
-			fmt.Printf("  %-15s not reachable (%s)\n", "DBS Server:", dbsAddress)
-			fmt.Printf("                   Start DBS server for live engine stats.\n")
-			fmt.Printf("  %-15s %s\n", "ClamAV Engine:", boolYesNo(cfg.Scanner.ClamAVEnabled))
+			fmt.Printf("  %-18s not reachable (%s)\n", "Database Server:", dbsAddress)
+			fmt.Printf("                       Start database server for live engine stats.\n")
+			fmt.Printf("  %-18s %s\n", "ClamAV Engine:", boolYesNo(cfg.Scanner.ClamAVEnabled))
 			fmt.Println()
 		}
 	} else {
-		fmt.Printf("  %-15s not reachable (%s): %v\n", "DBS Server:", dbsAddress, clientErr)
-		fmt.Printf("  %-15s %s\n", "ClamAV Engine:", boolYesNo(cfg.Scanner.ClamAVEnabled))
+		fmt.Printf("  %-18s not reachable (%s): %v\n", "Database Server:", dbsAddress, clientErr)
+		fmt.Printf("  %-18s %s\n", "ClamAV Engine:", boolYesNo(cfg.Scanner.ClamAVEnabled))
 		fmt.Println()
 	}
 
@@ -84,28 +84,28 @@ func runStatus(cmd *cobra.Command, args []string) {
 	qMgr := quarantine.NewQuarantineManager(&cfg.Quarantine)
 	quarantineCount := 0
 	if entries, err := qMgr.List(ctx); err != nil {
-		fmt.Printf("  %-15s unavailable (%v)\n", "Quarantine:", err)
+		fmt.Printf("  %-18s unavailable (%v)\n", "Quarantine:", err)
 	} else {
 		quarantineCount = len(entries)
 	}
 	if quarantineCount == 1 {
-		fmt.Printf("  %-15s 1 file\n", "Quarantine:")
+		fmt.Printf("  %-18s 1 file\n", "Quarantine:")
 	} else {
-		fmt.Printf("  %-15s %d files\n", "Quarantine:", quarantineCount)
+		fmt.Printf("  %-18s %d files\n", "Quarantine:", quarantineCount)
 	}
 	fmt.Println()
 
-	// --- RTP ---
-	fmt.Println("  RTP:")
+	// --- Real-Time Protector ---
+	fmt.Println("  Real-Time Protector:")
 	if len(cfg.Monitor.Paths) == 1 {
-		fmt.Printf("    %-12s 1 path (%s)\n", "Monitoring:", cfg.Monitor.Paths[0])
+		fmt.Printf("    %-16s 1 path (%s)\n", "Monitoring:", cfg.Monitor.Paths[0])
 	} else {
-		fmt.Printf("    %-12s %d paths (%s)\n", "Monitoring:", len(cfg.Monitor.Paths), strings.Join(cfg.Monitor.Paths, ", "))
+		fmt.Printf("    %-16s %d paths (%s)\n", "Monitoring:", len(cfg.Monitor.Paths), strings.Join(cfg.Monitor.Paths, ", "))
 	}
 	if len(cfg.Monitor.ExcludeDirs) == 1 {
-		fmt.Printf("    %-12s 1 path (%s)\n", "Excluded:", cfg.Monitor.ExcludeDirs[0])
+		fmt.Printf("    %-16s 1 path (%s)\n", "Excluded:", cfg.Monitor.ExcludeDirs[0])
 	} else {
-		fmt.Printf("    %-12s %d paths (%s)\n", "Excluded:", len(cfg.Monitor.ExcludeDirs), strings.Join(cfg.Monitor.ExcludeDirs, ", "))
+		fmt.Printf("    %-16s %d paths (%s)\n", "Excluded:", len(cfg.Monitor.ExcludeDirs), strings.Join(cfg.Monitor.ExcludeDirs, ", "))
 	}
 	fmt.Println()
 
@@ -115,24 +115,24 @@ func runStatus(cmd *cobra.Command, args []string) {
 	if updateInterval == "" {
 		updateInterval = "disabled"
 	}
-	fmt.Printf("    %-12s %s\n", "Update:", updateInterval)
+	fmt.Printf("    %-16s %s\n", "Update:", updateInterval)
 
 	scanInterval := cfg.Scheduler.ScanInterval
 	if scanInterval == "" {
 		scanInterval = "disabled"
 	}
-	fmt.Printf("    %-12s %s\n", "Scan:", scanInterval)
+	fmt.Printf("    %-16s %s\n", "Scan:", scanInterval)
 	fmt.Println()
 
 	// --- Updater ---
 	u := updater.NewUpdater(cfg)
 	lastUpdate := u.LastUpdateTime()
 	fmt.Println("  Updater:")
-	fmt.Printf("    %-12s %s\n", "Auto-Update:", boolYesNo(cfg.Updater.AutoUpdateSignatures))
+	fmt.Printf("    %-16s %s\n", "Auto-Update:", boolYesNo(cfg.Updater.AutoUpdateSignatures))
 	if !lastUpdate.IsZero() {
-		fmt.Printf("    %-12s %s\n", "Last Update:", lastUpdate.Format("2006-01-02 15:04:05 MST"))
+		fmt.Printf("    %-16s %s\n", "Last Update:", lastUpdate.Format("2006-01-02 15:04:05 MST"))
 	} else {
-		fmt.Printf("    %-12s never\n", "Last Update:")
+		fmt.Printf("    %-16s never\n", "Last Update:")
 	}
 }
 
@@ -181,7 +181,7 @@ func printVersionInfo(cfg *config.Config) {
 	if err != nil {
 		lmdVer = "not found"
 	}
-	fmt.Printf("    %-15s %s\n", "LMD Version:", lmdVer)
+	fmt.Printf("    %-16s %s\n", "LMD Version:", lmdVer)
 
 	// ClamAV CVD versions (read from disk if enabled)
 	if cfg.Scanner.ClamAVEnabled {
@@ -190,7 +190,7 @@ func printVersionInfo(cfg *config.Config) {
 			clamDBPath = cfg.App.ClamAVDir
 		}
 
-		fmt.Printf("    %-15s enabled\n", "ClamAV Engine:")
+		fmt.Printf("    %-16s enabled\n", "ClamAV Engine:")
 
 		for _, dbName := range []string{"main.cvd", "daily.cvd", "bytecode.cvd"} {
 			cvdPath := filepath.Join(clamDBPath, dbName)
@@ -205,7 +205,7 @@ func printVersionInfo(cfg *config.Config) {
 			}
 		}
 	} else {
-		fmt.Printf("    %-15s disabled\n", "ClamAV Engine:")
+		fmt.Printf("    %-16s disabled\n", "ClamAV Engine:")
 	}
 }
 
@@ -241,7 +241,7 @@ func boolYesNo(b bool) string {
 	return "disabled"
 }
 
-// dbsServerAddress returns the DBS server address string.
+// dbsServerAddress returns the database server address string.
 func dbsServerAddress(cfg *config.Config) string {
 	if cfg.Server.Network == "unix" || cfg.Server.Network == "" {
 		return fmt.Sprintf("unix://%s", cfg.Server.SocketPath)
