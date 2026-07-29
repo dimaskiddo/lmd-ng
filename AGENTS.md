@@ -52,6 +52,8 @@ lmd-ng [--config <path>]
     rtp                   # Start only RTP client
   scan <path>             # On-demand scan (DBS-first, local fallback)
   update                  # Manual signature update
+  upgrade [--force]       # Self-upgrade binary from GitHub releases
+  status                  # Display DBS status, signature counts, versions, quarantine, RTP, scheduler
   service
     install [dbs|rtp]     # Install as OS service
     uninstall [dbs|rtp]   # Remove OS service
@@ -133,7 +135,7 @@ lmd-ng [--config <path>]
 
 ```
 lmd-ng/
-├── cmd/lmd-ng/           # Entry: cobra CLI (main, daemon, scan, update, service, quarantine, version)
+├── cmd/lmd-ng/           # Entry: cobra CLI (main, daemon, scan, update, upgrade, status, service, quarantine, version)
 ├── internal/
 │   ├── config/           # Viper YAML config, path resolution, hot-reload (SIGHUP)
 │   ├── dbs/              # Database Signature Server (TCP/TLS, Unix socket)
@@ -142,6 +144,7 @@ lmd-ng/
 │   ├── monitor/          # Platform-specific FS events (darwin/other)
 │   ├── scheduler/        # Cron-based update + scan scheduling
 │   ├── updater/          # LMD + ClamAV signature download
+│   ├── upgrade/          # Binary self-upgrade (GitHub Releases API, platform-specific swap)
 │   ├── quarantine/       # AES-256-GCM quarantine, metadata capture
 │   ├── protocol/         # Binary wire protocol + TLS
 │   ├── notifier/         # Email + Telegram notifications

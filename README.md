@@ -1,25 +1,27 @@
 # 🛡️ Linux Malware Detect Next Generation (LMD-NG)
 
-Welcome to the future of multi-platform security! **LMD-NG** is a complete, ground-up rewrite of the legendary **Linux Malware Detect (LMD/MalDet)**. Built with **Golang and CGO**, LMD-NG brings battle-tested security logic to **Linux**, **macOS**, and **Windows** with a modern, high-performance architecture. 🐹✨
+**LMD-NG** is a ground-up rewrite of **Linux Malware Detect (LMD/MalDet)**. Built with **Golang and CGO**, LMD-NG brings security logic to **Linux**, **macOS**, and **Windows** with a client-server architecture.
 
-LMD-NG utilizes a **Client-Server Architecture** to maximize efficiency. A centralized **Database Signature Service (DBS)** handles all heavy lifting—loading massive signature databases into memory once—while lightweight **Real-Time Protector (RTP)** clients and CLI tools stream data for lightning-fast matching.
+A centralized **Database Signature Service (DBS)** loads signature databases into memory once, while lightweight **Real-Time Protector (RTP)** clients and CLI tools stream data for matching.
 
 ---
 
 ## ✨ Why LMD-NG?
 
 *   **⚡ Client-Server Architecture:** Centralized signature matching via **DBS** (server) while **RTP** and **On-Demand Scan** act as lightweight clients, reducing memory overhead across multiple nodes.
-*   **🕵️ Real-Time Protection:** Native file system monitoring—**FSEvents** on macOS (via CGO/Zig) and **fsnotify** on Linux/Windows—catches threats the moment they land.
-*   **🔍 On-Demand Scanning:** Perform manual, high-performance scans of any directory. Like the RTP, the scan CLI acts as a DBS client to leverage centralized, in-memory signatures.
-*   **🔄 Intelligent Updates:** Automated signature updates with hot-reload support—the DBS server stays current without restarting active scans.
-*   **📦 Native ClamAV Loader:** Built-in pure Go support for ClamAV databases (`.cvd`, `.cld`, `.ndb`, `.hdb`) with **zero** `libclamav` or `os/exec` dependencies.
-*   **📥 Secure Quarantine:** Isolates threats with optional **AES-256 encryption** and full POSIX attribute preservation for safe restoration.
-*   **🔒 Secure Streaming:** Clients communicate with the DBS server over encrypted TLS or Unix domain sockets using a custom high-performance binary protocol.
-*   **📧 Multi-Channel Alerts:** Instant notifications via **Email (SMTP)** or **Telegram** when malware is detected.
-*   **📊 Structured Logging:** Clean, modern observability using Go's native `slog`.
-*   **🚀 Auto-Tuned System Limits:** Automatically optimizes file descriptor limits to ensure smooth performance during heavy scans.
-*   **🌍 Truly Cross-Platform:** Native support for **Linux**, **macOS**, and **Windows**. No legacy bash dependencies.
-*   **🛠️ Zig CGO Toolchain:** Compiled with `CGO_ENABLED=1` using the **Zig compiler** as a cross-platform C/C++ frontend. Zig provides a self-contained toolchain that makes cross-compilation effortless and reproducible compared to standard GCC or Clang.
+*   **🕵️ Real-Time Protection:** Native file system monitoring—**FSEvents** on macOS (via CGO/Zig) and **fsnotify** on Linux/Windows.
+*   **🔍 On-Demand Scanning:** Manual scans of any directory. Scan CLI acts as a DBS client for centralized, in-memory signatures.
+*   **🔄 Intelligent Updates:** Automated signature updates with hot-reload—DBS stays current without restarting active scans.
+*   **⬆️ Self-Upgrade:** One-command binary upgrade from GitHub releases. Downloads, stops services, replaces binary, restarts. Linux/macOS: atomic inode swap. Windows: batch trampoline for locked `.exe`.
+*   **📊 Status Dashboard:** `lmd-ng status` shows DBS reachability, engine signature counts (MD5, SHA256, HEX, RFXN, ClamAV HDB/NDB/MDB), CVD database versions, quarantine count, RTP paths, and scheduler config.
+*   **📦 Native ClamAV Loader:** Pure Go support for ClamAV databases (`.cvd`, `.cld`, `.ndb`, `.hdb`, `.mdb`). No `libclamav` or `os/exec` dependencies.
+*   **📥 Secure Quarantine:** AES-256-GCM encryption, POSIX attribute preservation, short-ID lookup.
+*   **🔒 Secure Streaming:** TLS mutual authentication over Unix domain sockets or TCP.
+*   **📧 Multi-Channel Alerts:** Email (SMTP) and Telegram notifications on quarantine events.
+*   **📊 Structured Logging:** Go `slog` with lumberjack rotation.
+*   **🚀 Auto-Tuned System Limits:** Automatically optimizes file descriptor limits for heavy scans.
+*   **🌍 Cross-Platform:** Linux, macOS, Windows. No legacy bash dependencies.
+*   **🛠️ Zig CGO Toolchain:** Compiled with `CGO_ENABLED=1` using the **Zig compiler** for reproducible cross-platform builds.
 ---
 
 ## 🏗️ Architecture at a Glance
@@ -86,7 +88,6 @@ graph TD
 
 #### 🐧 **Linux / 🍎 macOS**
 ```sh
-# Give it execution power
 chmod +x lmd-ng
 
 # Update signature databases
@@ -130,7 +131,7 @@ make build
 
 ## 🕹️ Usage & Commands
 
-LMD-NG is managed via a powerful CLI:
+LMD-NG is managed via a CLI:
 
 ### 💂‍♂️ Daemon Services
 *   **`lmd-ng daemon`**: Start both **DBS** (Server) and **RTP** (Client) in one process.
@@ -140,6 +141,8 @@ LMD-NG is managed via a powerful CLI:
 ### 🔍 Scanning & Updates
 *   **`lmd-ng scan <path>`**: Perform an on-demand scan. Streams data to the local DBS.
 *   **`lmd-ng update`**: Update signatures and trigger a hot-reload in the running DBS.
+*   **`lmd-ng upgrade [--force]`**: Self-upgrade binary from GitHub releases. Without `--force`, exits early if already up-to-date.
+*   **`lmd-ng status`**: Display DBS reachability, signature counts, CVD versions, quarantine, RTP config.
 
 ### 📥 Quarantine Management
 *   **`lmd-ng quarantine list`**: List all quarantined files.
@@ -180,14 +183,17 @@ go test ./...
 
 ---
 
-## 🏗️ Built With Love & Power
+## 🏗️ Dependencies
 
-*   **[Go](https://golang.org/)** - The engine behind LMD-NG.
-*   **[Zig](https://ziglang.org/)** - The cross-compilation powerhouse for CGO.
-*   **[Cobra](https://github.com/spf13/cobra)** - Modern CLI framework.
-*   **[fsnotify/fsnotify](https://github.com/fsnotify/fsnotify)** - Cross-platform file system watcher for Linux and Windows.
-*   **[fsnotify/fsevents](https://github.com/fsnotify/fsevents)** - Native FSEvents watcher for macOS.
-*   **[kardianos/service](https://github.com/kardianos/service)** - Multi-platform service manager.
+*   **[Go](https://golang.org/)**
+*   **[Zig](https://ziglang.org/)** - CGO cross-compilation
+*   **[Cobra](https://github.com/spf13/cobra)** - CLI framework
+*   **[Viper](https://github.com/spf13/viper)** - YAML configuration with hot-reload
+*   **[robfig/cron](https://github.com/robfig/cron)** - Scheduling for updates and scans
+*   **[fsnotify/fsnotify](https://github.com/fsnotify/fsnotify)** - File system watcher (Linux/Windows)
+*   **[fsnotify/fsevents](https://github.com/fsnotify/fsevents)** - FSEvents watcher (macOS)
+*   **[kardianos/service](https://github.com/kardianos/service)** - OS service management
+*   **[natefinch/lumberjack](https://github.com/natefinch/lumberjack)** - Log rotation
 
 ---
 

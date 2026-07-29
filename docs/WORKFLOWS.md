@@ -111,7 +111,7 @@ RTP callback → walker.ApplyFilters → dbsClient.ScanFile
 
 **Local fallback (DBS unavailable):**
 ```
-scan command → dbsClient.WaitForServer (30 retries × 2s)
+scan command → dbsClient.Ping (single check)
 → if unreachable → ScanCoordinator.StartScan
 → walker.Walk → per file: ScanFile → ScanDataWithEngines
 → results channel → collect + quarantine if matched
@@ -148,7 +148,7 @@ scan command → dbsClient.WaitForServer (30 retries × 2s)
 ### 7. On-Demand Scan (`cmd/lmd-ng/scan.go`)
 
 1. Parse args: `lmd-ng scan <path>`
-2. Try DBS first: `dbsClient.WaitForServer(ctx)` (30 retries × 2s)
+2. Try DBS first: `dbsClient.Ping(ctx)` (single check)
 3. If reachable: `dbsClient.ScanFile(path)` for each matched path
 4. If unreachable: fall back to `ScanCoordinator.StartScan(ctx, path, quarantineMgr)` — local scan using engines directly
 

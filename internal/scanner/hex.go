@@ -125,6 +125,17 @@ func (s *hexScanner) loadSignatures(filePath string) error {
 			continue
 		}
 
+		// Reject signatures with fewer than 4 static bytes — too short to be
+		// specific, high false positive risk across unrelated files.
+		if !sig.fixed {
+			staticBytes := len(sig.pattern) - len(sig.wildcardPos)
+			if staticBytes < 4 {
+				log.Warn("HEX signature too short, skipping (high false positive risk)",
+					"name", sig.name, "static_bytes", staticBytes, "file", filePath)
+				continue
+			}
+		}
+
 		s.signatures = append(s.signatures, *sig)
 		loaded++
 	}
@@ -203,6 +214,11 @@ func compileHexSignature(patternHex, name string) (*hexSignatureEntry, error) {
 
 	if hasComplexWildcards {
 		return nil, fmt.Errorf("complex wildcards (nibble, *, {}) not supported in LMD hex — use RFXN NDB")
+	}
+
+	// Reject all-wildcard patterns — they match everything (high false positive risk)
+	if len(wildcardPos) == len(pattern) {
+		return nil, fmt.Errorf("pattern has no fixed bytes (all wildcards)")
 	}
 
 	return &hexSignatureEntry{
@@ -308,19 +324,22 @@ func (s *hexScanner) Count() int {
 // Check searches the given content for any loaded hex signatures and returns their names.
 //
 // False-positive guard: if the file's content begins with a native-executable
-// magic header (ELF or Mach-O), any signature whose name starts with a
-// Windows-targeted threat family prefix (e.g. "Win.", "Backdoor.Win") is
-// skipped. This prevents Windows-specific hex patterns from matching against
-// Linux shared libraries or macOS dylibs.
+// magic header (ELF or Mach-O), any signature whose name does NOT start with
+// a known Unix-targeted prefix (e.g. "Unix.", "Linux.") is skipped. This
+// prevents Windows-specific hex patterns from matching against Linux shared
+// libraries or macOS dylibs. LMD hex.dat contains predominantly Windows
+// signatures — non-Unix-targeted sigs on a non-Windows binary are the common
+// case, not the edge.
 func (s *hexScanner) Check(content []byte, filePath string) []string {
 	detectedType := detectMagicType(content)
 	nativeExec := isNativeExecutable(detectedType)
 
 	var matchedSigs []string
 	for _, sig := range s.signatures {
-		// Skip Windows-targeted signatures when scanning native executables.
-		if nativeExec && isWindowsTargetedSig(sig.name) {
-			log.Debug("Skipping Windows-targeted HEX signature on native executable",
+		// Skip non-Unix signatures when scanning native executables (ELF/Mach-O).
+		// Only keep signatures explicitly targeting Unix/macOS platforms.
+		if nativeExec && !isUnixTargetedSig(sig.name) {
+			log.Debug("Skipping non-Unix HEX signature on native executable",
 				"signature", sig.name,
 				"file", filePath,
 				"detected_type", detectedType)

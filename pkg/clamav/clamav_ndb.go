@@ -357,10 +357,14 @@ func resolveOffsetContent(content []byte, offset string, fileSize int64, minWind
 	}
 
 	// Handle PE/ELF specific offsets — structural offsets (EP, Sx, SE, SL) require
-	// PE/ELF header parsing. Fall back to full-content search: this can cause false
-	// positives (pattern matches in wrong location) but never causes missed detections.
+	// PE/ELF header parsing. Skip these signatures rather than falling back to
+	// full-content search, which would match against unintended byte locations
+	// and cause false positives. The signature author intended a targeted match;
+	// full-content search violates that intent.
 	if strings.HasPrefix(offset, "EP") || strings.HasPrefix(offset, "S") {
-		return content
+		slog.Debug("Skipping NDB signature with unresolvable structural offset",
+			"offset", offset, "reason", "PE/ELF header parsing not implemented, full-content fallback rejected")
+		return nil
 	}
 
 	// Handle plain numeric offset
@@ -394,6 +398,12 @@ func compileNDBSignature(name string, targetType int, offset, hexSig string, min
 			return nil, fmt.Errorf("failed to decode simple hex pattern: %w", err)
 		}
 
+		// Reject fixed patterns with fewer than 4 static bytes — too short
+		// to be specific, high false positive risk across unrelated files.
+		if len(decoded) < 4 {
+			return nil, fmt.Errorf("fixed hex pattern too short (%d bytes, minimum 4)", len(decoded))
+		}
+
 		sig.FixedBytes = decoded
 		sig.IsFixed = true
 
@@ -406,6 +416,14 @@ func compileNDBSignature(name string, targetType int, offset, hexSig string, min
 		return nil, fmt.Errorf("failed to convert hex pattern to regex: %w", err)
 	}
 
+	// Count static bytes in the compiled regex by counting literal \xNN occurrences.
+	// Wildcards expand to character classes/quantifiers without \x, so this gives
+	// an accurate lower bound on the static content in the pattern.
+	staticByteCount := countStaticBytesInRegex(regexStr)
+	if staticByteCount < 4 {
+		return nil, fmt.Errorf("hex pattern too short (%d static bytes, minimum 4)", staticByteCount)
+	}
+
 	compiled, err := regexp.Compile(regexStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile regex from hex pattern: %w", err)
@@ -413,6 +431,27 @@ func compileNDBSignature(name string, targetType int, offset, hexSig string, min
 
 	sig.Pattern = compiled
 	return sig, nil
+}
+
+// countStaticBytesInRegex counts literal \xNN byte matches in a compiled regex
+// string. These represent actual fixed bytes that must match — wildcards expand
+// to character classes without \x. This gives an accurate count of static
+// content for false-positive risk assessment.
+func countStaticBytesInRegex(regexStr string) int {
+	count := 0
+	i := 0
+
+	for i < len(regexStr)-1 {
+		if regexStr[i] == '\\' && regexStr[i+1] == 'x' && i+3 < len(regexStr) {
+			// \xNN — literal byte match
+			count++
+			i += 4
+		} else {
+			i++
+		}
+	}
+
+	return count
 }
 
 // isSimpleHexPattern returns true if the hex signature contains no wildcards or

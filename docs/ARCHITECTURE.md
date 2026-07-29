@@ -13,6 +13,8 @@ graph LR
         Daemon["daemon.go"]
         Scan["scan.go"]
         Update["update.go"]
+        Upgrade["upgrade.go"]
+        Status["status.go"]
         Service["service.go"]
         Quarantine["quarantine.go"]
     end
@@ -26,6 +28,7 @@ graph LR
         Monitor["monitor/"]
         Scheduler["scheduler/"]
         Updater["updater/"]
+        UpgradeSvc["upgrade/"]
         QuarantineMgr["quarantine/"]
         Protocol["protocol/"]
         Notifier["notifier/"]
@@ -67,6 +70,12 @@ graph LR
     Scheduler --> Updater
     Scheduler --> DBS
     ServiceMgr --> Daemon
+    Upgrade --> UpgradeSvc
+    Upgrade --> ServiceMgr
+    Config --> Upgrade
+    UpgradeSvc --> Config
+    Status --> DBS
+    Status --> Config
 ```
 
 ---
@@ -102,6 +111,7 @@ sequenceDiagram
 | **Protocol** | `internal/protocol/` | Binary wire format over TLS (unix socket or TCP) |
 | **Quarantine** | `internal/quarantine/` | AES-256-GCM encrypt, POSIX metadata capture, short-ID lookup |
 | **Updater** | `internal/updater/` | Download LMD/ClamAV signatures, version check, atomic install |
+| **Upgrade** | `internal/upgrade/` | Binary self-upgrade — GitHub Releases API, zip/tgz extraction, platform-specific swap |
 | **Scheduler** | `internal/scheduler/` | Cron-based update + scan scheduling |
 | **Notifier** | `internal/notifier/` | Email (SMTP) + Telegram on quarantine events |
 | **Service** | `internal/service/` | OS service install via `kardianos/service` |
@@ -125,10 +135,12 @@ Binary wire format: `[1-byte type][4-byte length BE][payload]`
 | 0x07 | `MsgPong` | server→client | Empty |
 | 0x08 | `MsgReloadSignatures` | client→server | Empty |
 | 0x09 | `MsgReloadAck` | server→client | Empty |
+| 0x0A | `MsgStatusRequest` | client→server | Empty |
+| 0x0B | `MsgStatusResponse` | server→client | JSON-encoded `StatusData` |
 
 **Limits:** `MaxChunkSize` = 32KB, `MaxPayloadSize` = 1MB. TLS mandatory (`tls.VersionTLS13`, mutual auth).
 
-**Note:** `MsgReloadSignatures`/`MsgReloadAck` enable remote signature reload from a separate update client. Currently unused — scheduler calls `ReloadEngines()` in-process.
+**Note:** `MsgReloadSignatures`/`MsgReloadAck` are used by `lmd-ng update` to notify a running DBS server to reload engines after signature download.
 
 ---
 
@@ -172,6 +184,7 @@ Filter pipeline applied per file:
 4. Owner filters (Unix: UID/GID via `syscall.Stat_t`; Windows: no-op)
 5. Exclude regex check
 6. Include regex check (if set)
+7. Scan-ignore file patterns: glob match against `filepath.Base(path)` using `scan_ignore_file_patterns` config. Extension shorthand (`.log` → `*.log`) auto-normalized. Default list covers archives, documents, audio, video, images, databases, VMs, logs, swap/cache, Exchange files.
 
 Platform-specific: `walker_unix.go` (`applyOwnerFilters` — UID/GID), `walker_windows.go` (no-op).
 
@@ -307,3 +320,4 @@ Privilege check (Unix: UID==0; Windows: `Token.IsElevated()`) → resolve execut
 8. **Stdlib first** — minimal third-party deps. Zig CC for CGO cross-compilation, not raw gcc/clang
 9. **Dual output logging** — `slog` structured logging with lumberjack rotation, simultaneous stdout + file via `io.MultiWriter`
 10. **Config paths relative to binary** — all paths resolved from binary's real directory, not CWD. Avoids ambiguity in daemon/service mode
+11. **Platform-aware self-upgrade** — Linux/macOS: atomic inode rename. Windows: batch trampoline (copies new binary, exits old process, batch swaps + restarts services). Service-aware: only restarts installed services.

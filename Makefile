@@ -52,7 +52,7 @@ docker-build:
 
 run:
 	make vendor
-	go run *.go
+	go run ./cmd/lmd-ng
 
 clean-dist:
 	rm -rf dist
