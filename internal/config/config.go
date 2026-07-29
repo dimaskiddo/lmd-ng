@@ -198,7 +198,7 @@ func setDefaultConfig(config *Config) {
 	config.Scanner.MinFilesize = 0
 	config.Scanner.MaxFilesize = "20M"
 	config.Scanner.MaxDepth = 0
-	config.Scanner.HexDepth = 20000
+	config.Scanner.HexDepth = 262144 // Maldet default: 256KB covers ~98.9% of hex patterns
 	config.Scanner.CPULimit = 0
 	config.Scanner.ConcurrencyLimit = 192
 

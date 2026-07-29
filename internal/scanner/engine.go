@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dimaskiddo/lmd-ng/pkg/clamav"
 
@@ -132,30 +133,42 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 		}
 
 		if entry, found := s.clamavScanner.HDB.LookupMD5(md5Hash, fileSize); found {
-			return []*ScanResult{{
-				SignatureName: entry.Name,
-				SignatureType: "RFXN-MD5",
-				FilePath:      filePath,
-				DetectionID:   fmt.Sprintf("rfxn.md5.%s", md5Hash),
-			}}, nil
+			if s.isPathAllowlisted(filePath) {
+				log.Warn("RFXN-MD5 match suppressed by allowlist", "file", filePath, "signature", entry.Name)
+			} else {
+				return []*ScanResult{{
+					SignatureName: entry.Name,
+					SignatureType: "RFXN-MD5",
+					FilePath:      filePath,
+					DetectionID:   fmt.Sprintf("rfxn.md5.%s", md5Hash),
+				}}, nil
+			}
 		}
 
 		if entry, found := s.clamavScanner.HDB.LookupSHA1(sha1Hash, fileSize); found {
-			return []*ScanResult{{
-				SignatureName: entry.Name,
-				SignatureType: "RFXN-SHA1",
-				FilePath:      filePath,
-				DetectionID:   fmt.Sprintf("rfxn.sha1.%s", sha1Hash),
-			}}, nil
+			if s.isPathAllowlisted(filePath) {
+				log.Warn("RFXN-SHA1 match suppressed by allowlist", "file", filePath, "signature", entry.Name)
+			} else {
+				return []*ScanResult{{
+					SignatureName: entry.Name,
+					SignatureType: "RFXN-SHA1",
+					FilePath:      filePath,
+					DetectionID:   fmt.Sprintf("rfxn.sha1.%s", sha1Hash),
+				}}, nil
+			}
 		}
 
 		if entry, found := s.clamavScanner.HDB.LookupSHA256(sha256Hash, fileSize); found {
-			return []*ScanResult{{
-				SignatureName: entry.Name,
-				SignatureType: "RFXN-SHA256",
-				FilePath:      filePath,
-				DetectionID:   fmt.Sprintf("rfxn.sha256.%s", sha256Hash),
-			}}, nil
+			if s.isPathAllowlisted(filePath) {
+				log.Warn("RFXN-SHA256 match suppressed by allowlist", "file", filePath, "signature", entry.Name)
+			} else {
+				return []*ScanResult{{
+					SignatureName: entry.Name,
+					SignatureType: "RFXN-SHA256",
+					FilePath:      filePath,
+					DetectionID:   fmt.Sprintf("rfxn.sha256.%s", sha256Hash),
+				}}, nil
+			}
 		}
 
 		if s.clamavScanner.NDB.TotalCount() > 0 {
@@ -231,6 +244,18 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 // Name returns the name of the LMDSignatureScanner.
 func (s *LMDSignatureScanner) Name() string {
 	return "LMD Native Signature Engine"
+}
+
+// isPathAllowlisted returns true if filePath starts with any configured
+// HashAllowlistPaths prefix. Used to suppress hash-based detections for
+// known-good system paths (e.g. /usr/bin, /usr/lib).
+func (s *LMDSignatureScanner) isPathAllowlisted(filePath string) bool {
+	for _, prefix := range s.cfg.Scanner.HashAllowlistPaths {
+		if strings.HasPrefix(filePath, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // ClamAVSignatureEngine implements the SignatureEngine interface using ClamAV

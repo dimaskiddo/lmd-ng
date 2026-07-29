@@ -56,7 +56,7 @@ scanner:
   min_filesize: 0
   max_filesize: 20M
   max_depth: 0
-  hex_depth: 20000
+  hex_depth: 262144                    # Maldet default: 256KB (~98.9% pattern coverage)
   cpu_limit: 0                        # 0 = auto-detect (uses all CPU cores)
   concurrency_limit: 192             # Max concurrent DBS scan requests (DBS client path)
   ignore_root: false

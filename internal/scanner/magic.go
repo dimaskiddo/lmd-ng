@@ -67,7 +67,7 @@ func isNativeExecutable(magicType int) bool {
 // any of these prefixes are skipped when scanning ELF / Mach-O files.
 var winTargetedPrefixes = []string{
 	"Win.",
-	"Worm.",
+	"Worm.Win",
 	"Backdoor.Win",
 	"Trojan.Win",
 	"Adware.Win",

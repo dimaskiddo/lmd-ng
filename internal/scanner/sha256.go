@@ -63,6 +63,8 @@ func (s *sha256Scanner) loadSignatures(filePath string) error {
 	}
 	defer file.Close()
 
+	sigsBefore := len(s.signatures)
+
 	// Buffer: initial 64KB, max 1MB per line. This limits individual line
 	// length, NOT the total number of signatures — all lines are still read.
 	scanner := bufio.NewScanner(file)
@@ -103,7 +105,7 @@ func (s *sha256Scanner) loadSignatures(filePath string) error {
 		s.signatures[hash] = name
 	}
 
-	log.Info("Loaded SHA256 signatures", "count", len(s.signatures), "file", filePath)
+	log.Info("Loaded SHA256 signatures", "count", len(s.signatures)-sigsBefore, "file", filePath)
 	return nil
 }
 
