@@ -112,7 +112,7 @@ type SchedulerConfig struct {
 	ScanInterval   string `yaml:"scan_interval" mapstructure:"scan_interval"`
 }
 
-// UpdaterConfig holds signature updater settings.
+// UpdaterConfig holds signature and binary updater settings.
 type UpdaterConfig struct {
 	AutoUpdateSignatures bool     `yaml:"auto_update_signatures" mapstructure:"auto_update_signatures"`
 	RemoteURITimeout     string   `yaml:"remote_uri_timeout" mapstructure:"remote_uri_timeout"`
@@ -121,6 +121,8 @@ type UpdaterConfig struct {
 	ClamAVUpdateEnabled  bool     `yaml:"clamav_update_enabled" mapstructure:"clamav_update_enabled"`
 	ClamAVMirrorURL      string   `yaml:"clamav_mirror_url" mapstructure:"clamav_mirror_url"`
 	ClamAVDatabases      []string `yaml:"clamav_databases" mapstructure:"clamav_databases"`
+	AutoUpgradeBinary    bool     `yaml:"auto_upgrade_binary" mapstructure:"auto_upgrade_binary"`
+	ReleaseAPIURL        string   `yaml:"release_api_url" mapstructure:"release_api_url"`
 }
 
 // NotificationConfig holds notification settings.
@@ -255,6 +257,9 @@ func setDefaultConfig(config *Config) {
 	config.Updater.ClamAVUpdateEnabled = false
 	config.Updater.ClamAVMirrorURL = "https://database.clamav.net"
 	config.Updater.ClamAVDatabases = []string{"daily.cvd", "bytecode.cvd", "main.cvd"}
+
+	config.Updater.AutoUpgradeBinary = false
+	config.Updater.ReleaseAPIURL = "https://api.github.com/repos/dimaskiddo/lmd-ng/releases/latest"
 
 	config.Notification.Email.Enabled = false
 	config.Notification.Email.SMTPHost = "smtp.example.com"

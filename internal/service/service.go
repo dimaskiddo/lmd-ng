@@ -228,3 +228,17 @@ func RestartService(_ *config.Config, comp Component) error {
 
 	return nil
 }
+
+// IsServiceInstalled checks whether an OS service with the given component
+// name is currently installed. It does not require elevated privileges.
+func IsServiceInstalled(comp Component) bool {
+	svcConfig := &kservice.Config{Name: serviceName(comp)}
+
+	svc, err := kservice.New(&LMDService{}, svcConfig)
+	if err != nil {
+		return false
+	}
+
+	_, err = svc.Status()
+	return err == nil
+}

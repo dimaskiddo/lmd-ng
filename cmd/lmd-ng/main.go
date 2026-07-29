@@ -134,6 +134,7 @@ func main() {
 	rootCmd.AddCommand(daemonCmd())
 	rootCmd.AddCommand(scanCmd())
 	rootCmd.AddCommand(updateCmd())
+	rootCmd.AddCommand(upgradeCmd())
 	rootCmd.AddCommand(serviceCmd())
 	rootCmd.AddCommand(quarantineCmd())
 	rootCmd.AddCommand(statusCmd())
