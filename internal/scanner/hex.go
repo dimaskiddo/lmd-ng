@@ -24,8 +24,8 @@ type hexScanner struct {
 	signatures []hexSignatureEntry
 }
 
-// NewHexScanner creates and initializes a new hex scanner.
-func NewHexScanner(cfg *config.Config) (*hexScanner, error) {
+// newHexScanner creates and initializes a new hex scanner.
+func newHexScanner(cfg *config.Config) (*hexScanner, error) {
 	s := &hexScanner{
 		// Pre-allocate with reasonable initial capacity; no hard limit —
 		// append() grows the slice unboundedly for large signature sets.

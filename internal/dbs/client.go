@@ -40,7 +40,6 @@ var scanBufPool = sync.Pool{
 // It opens a new TLS connection per operation (scan, ping, reload) to keep
 // the protocol simple and stateless.
 type Client struct {
-	cfg       *config.Config
 	tlsConfig *tls.Config
 	network   string
 	address   string
@@ -75,7 +74,6 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	}
 
 	return &Client{
-		cfg:       cfg,
 		tlsConfig: tlsConfig,
 		network:   network,
 		address:   address,
@@ -224,10 +222,11 @@ func (c *Client) ScanFile(ctx context.Context, filePath string) ([]*scanner.Scan
 		log.Debug("Scan attempt failed, retrying", "file", filePath, "attempt", attempt, "max", maxRetries, "error", err)
 
 		if attempt < maxRetries {
+			timer := time.NewTimer(1 * time.Second)
 			select {
-			case <-time.After(1 * time.Second):
-
+			case <-timer.C:
 			case <-ctx.Done():
+				timer.Stop()
 				return nil, ctx.Err()
 			}
 		}
@@ -338,12 +337,12 @@ func (c *Client) attemptScanFile(ctx context.Context, filePath string, fileSize 
 		return nil, fmt.Errorf("failed to decode scan result for %s: %w", filePath, err)
 	}
 
+	// Scan completed successfully — connection is healthy and can be reused
+	connHealthy = true
+
 	if !resultMsg.Matched {
 		return nil, nil
 	}
-
-	// Scan completely succeeded, connection is healthy and can be reused
-	connHealthy = true
 
 	// Convert protocol.ScanResultEntry back to scanner.ScanResults
 	results := make([]*scanner.ScanResult, len(resultMsg.Results))

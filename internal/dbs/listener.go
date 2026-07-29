@@ -14,9 +14,9 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/protocol"
 )
 
-// NewListener creates a TLS-wrapped network listener based on the server
+// newListener creates a TLS-wrapped network listener based on the server
 // configuration. Both Unix socket and TCP transports are always encrypted.
-func NewListener(cfg *config.Config) (net.Listener, error) {
+func newListener(cfg *config.Config) (net.Listener, error) {
 	certFile, keyFile, caFile := protocol.ServerCertPaths(cfg)
 
 	tlsConfig, err := protocol.NewServerTLSConfig(certFile, keyFile, caFile)

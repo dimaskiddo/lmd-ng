@@ -141,13 +141,13 @@ type TelegramNotificationConfig struct {
 	ChatID   string `yaml:"chat_id" mapstructure:"chat_id"`
 }
 
-// SetDefaultConfig sets default values for the configuration.
+// setDefaultConfig sets default values for the configuration.
 // NOTE: BasePath is intentionally left as "." here as a compile-time
 // placeholder. NewConfigManager always overrides BasePath with the directory
 // that contains the running binary (via os.Executable), so sub-directory
 // defaults derived from it are also immediately re-derived there. This
 // function is therefore only responsible for setting non-path defaults.
-func SetDefaultConfig(config *Config) {
+func setDefaultConfig(config *Config) {
 	config.App.BasePath = "."
 	config.App.SignaturesDir = filepath.Join(config.App.BasePath, "sigs")
 	config.App.ClamAVDir = filepath.Join(config.App.BasePath, "clamav")

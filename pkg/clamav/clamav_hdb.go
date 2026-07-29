@@ -159,10 +159,9 @@ func (s *HDBStore) LoadHDB(r io.Reader, sourceName string) error {
 	return nil
 }
 
-// LookupMD5 checks if the given MD5 hash matches a known signature.
-// Returns the HashEntry and true if found, zero-value and false otherwise.
-func (s *HDBStore) LookupMD5(hash string, fileSize int64) (HashEntry, bool) {
-	entry, ok := s.MD5Hashes[strings.ToLower(hash)]
+// lookupEntry checks a specific hash map for a matching HDB signature.
+func (s *HDBStore) lookupEntry(m map[string]HashEntry, hash string, fileSize int64) (HashEntry, bool) {
+	entry, ok := m[strings.ToLower(hash)]
 	if !ok {
 		return HashEntry{}, false
 	}
@@ -175,30 +174,17 @@ func (s *HDBStore) LookupMD5(hash string, fileSize int64) (HashEntry, bool) {
 	return entry, true
 }
 
+// LookupMD5 checks if the given MD5 hash matches a known signature.
+func (s *HDBStore) LookupMD5(hash string, fileSize int64) (HashEntry, bool) {
+	return s.lookupEntry(s.MD5Hashes, hash, fileSize)
+}
+
 // LookupSHA1 checks if the given SHA1 hash matches a known signature.
 func (s *HDBStore) LookupSHA1(hash string, fileSize int64) (HashEntry, bool) {
-	entry, ok := s.SHA1Hashes[strings.ToLower(hash)]
-	if !ok {
-		return HashEntry{}, false
-	}
-
-	if entry.FileSize >= 0 && entry.FileSize != fileSize {
-		return HashEntry{}, false
-	}
-
-	return entry, true
+	return s.lookupEntry(s.SHA1Hashes, hash, fileSize)
 }
 
 // LookupSHA256 checks if the given SHA256 hash matches a known signature.
 func (s *HDBStore) LookupSHA256(hash string, fileSize int64) (HashEntry, bool) {
-	entry, ok := s.SHA256Hashes[strings.ToLower(hash)]
-	if !ok {
-		return HashEntry{}, false
-	}
-
-	if entry.FileSize >= 0 && entry.FileSize != fileSize {
-		return HashEntry{}, false
-	}
-
-	return entry, true
+	return s.lookupEntry(s.SHA256Hashes, hash, fileSize)
 }

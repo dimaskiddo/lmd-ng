@@ -58,7 +58,7 @@ func NewConfigManager(configFilePath string) (*Manager, error) {
 
 	// Set default values directly on the Config struct, using the binary
 	// directory as the base path instead of "."
-	SetDefaultConfig(m.Config)
+	setDefaultConfig(m.Config)
 	m.Config.App.BasePath = binDir
 
 	// Re-derive subdirectory defaults that depend on BasePath so they also
@@ -157,7 +157,7 @@ func (m *Manager) ReloadConfig() error {
 	}
 
 	newConfig := &Config{}
-	SetDefaultConfig(newConfig)
+	setDefaultConfig(newConfig)
 
 	if err := m.Viper.Unmarshal(newConfig); err != nil {
 		return fmt.Errorf("failed to unmarshal reloaded config: %w", err)

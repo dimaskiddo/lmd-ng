@@ -56,10 +56,9 @@ func ScanDataWithEngines(ctx context.Context, engines []SignatureEngine, r io.Re
 // ScanCoordinator orchestrates file system traversal and signature scanning.
 // Used by the local fallback scan path (when DBS server is not available).
 type ScanCoordinator struct {
-	cfg       *config.Config
-	walker    *Walker
-	engines   []SignatureEngine
-	enginesMu sync.RWMutex
+	cfg     *config.Config
+	walker  *Walker
+	engines []SignatureEngine
 }
 
 // NewScanCoordinator creates a new ScanCoordinator.
@@ -71,17 +70,10 @@ func NewScanCoordinator(cfg *config.Config, walker *Walker, engines []SignatureE
 	}
 }
 
-// getEngines returns a snapshot of the current engine list, safe for use
-// during a scan even if engines are swapped concurrently.
+// getEngines returns the engine list. Engines are immutable after construction
+// (set once in NewScanCoordinator), so no mutex is needed.
 func (sc *ScanCoordinator) getEngines() []SignatureEngine {
-	sc.enginesMu.RLock()
-	defer sc.enginesMu.RUnlock()
-
-	// Return a copy of the slice header so the caller holds a stable reference
-	engines := make([]SignatureEngine, len(sc.engines))
-	copy(engines, sc.engines)
-
-	return engines
+	return sc.engines
 }
 
 // StartScan begins a malware scan of the specified root path. If a
@@ -98,9 +90,6 @@ func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string, qMgr 
 	// "send on closed channel" panics.
 	var scanWg sync.WaitGroup
 
-	// Channel to collect scan results from concurrent file scans
-	resultsChan := make(chan []*ScanResult)
-
 	// Limit concurrent scanning goroutines based on CPULimit.
 	// We use a factor (e.g., 2x) to keep the CPU saturated while waiting for I/O,
 	// but restrict it enough to prevent unbounded CPU spikes and memory exhaustion.
@@ -112,6 +101,9 @@ func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string, qMgr 
 
 	maxConcurrency := maxWorkers * 2
 	sem := make(chan struct{}, maxConcurrency)
+
+	// Channel to collect scan results from concurrent file scans
+	resultsChan := make(chan []*ScanResult, maxConcurrency)
 
 	// Goroutine that walks the file tree and spawns scan goroutines
 	walkGroup.Go(func() error {

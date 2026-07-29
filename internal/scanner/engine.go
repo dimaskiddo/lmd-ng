@@ -22,7 +22,6 @@ type ScanResult struct {
 	SignatureName string // The name of the matching signature
 	SignatureType string // The type of signature (e.g., "MD5", "HEX", "YARA")
 	FilePath      string // The path to the file where the match was found
-	Offset        int64  // The offset within the file where the match occurred (if applicable)
 	DetectionID   string // A unique ID for this detection event
 }
 
@@ -46,17 +45,17 @@ type LMDSignatureScanner struct {
 
 // NewLMDSignatureScanner creates a new LMD native signature scanner.
 func NewLMDSignatureScanner(cfg *config.Config) (*LMDSignatureScanner, error) {
-	md5S, err := NewMD5Scanner(cfg)
+	md5S, err := newMD5Scanner(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create MD5 scanner: %w", err)
 	}
 
-	sha256S, err := NewSHA256Scanner(cfg)
+	sha256S, err := newSHA256Scanner(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create SHA256 scanner: %w", err)
 	}
 
-	hexS, err := NewHexScanner(cfg)
+	hexS, err := newHexScanner(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HEX scanner: %w", err)
 	}
@@ -332,7 +331,52 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 		}}, nil
 	}
 
-	// --- Phase 2: Body/NDB signature matching ---
+	// --- Phase 2: PE section hash detection (MDB) ---
+	if s.db.MDB.TotalCount() > 0 {
+		if _, err := r.Seek(0, io.SeekStart); err == nil {
+			// Read first 512 bytes for magic type detection
+			magicBuf := make([]byte, 512)
+			if n, _ := io.ReadFull(r, magicBuf); n > 0 {
+				magicType := detectMagicType(magicBuf[:n])
+
+				if magicType == magicTypePE {
+					sections, err := ParsePESections(r)
+					if err == nil {
+						for _, section := range sections {
+							if entry, ok := s.db.MDB.LookupMD5(section.MD5, section.Size); ok {
+								return []*ScanResult{{
+									SignatureName: entry.Name,
+									SignatureType: "ClamAV-MDB",
+									FilePath:      filePath,
+									DetectionID:   fmt.Sprintf("clamav.mdb.%s.%s", section.Name, section.MD5),
+								}}, nil
+							}
+
+							if entry, ok := s.db.MDB.LookupSHA1(section.SHA1, section.Size); ok {
+								return []*ScanResult{{
+									SignatureName: entry.Name,
+									SignatureType: "ClamAV-MDB",
+									FilePath:      filePath,
+									DetectionID:   fmt.Sprintf("clamav.mdb.%s.%s", section.Name, section.SHA1),
+								}}, nil
+							}
+
+							if entry, ok := s.db.MDB.LookupSHA256(section.SHA256, section.Size); ok {
+								return []*ScanResult{{
+									SignatureName: entry.Name,
+									SignatureType: "ClamAV-MDB",
+									FilePath:      filePath,
+									DetectionID:   fmt.Sprintf("clamav.mdb.%s.%s", section.Name, section.SHA256),
+								}}, nil
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// --- Phase 3: Body/NDB signature matching ---
 	if s.db.NDB.TotalCount() > 0 {
 		if _, err := r.Seek(0, io.SeekStart); err != nil {
 			return nil, fmt.Errorf("failed to seek to start for NDB scan: %w", err)

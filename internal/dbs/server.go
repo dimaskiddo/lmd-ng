@@ -36,7 +36,7 @@ type Server struct {
 // NewServer creates a new DBS server. It builds signature engines from the
 // current configuration and prepares the network listener.
 func NewServer(cfg *config.Config, engines []scanner.SignatureEngine) (*Server, error) {
-	ln, err := NewListener(cfg)
+	ln, err := newListener(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create listener: %w", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
@@ -17,8 +18,8 @@ type md5Scanner struct {
 	allowlistPaths []string          // path prefixes whose files are exempt from hash matching
 }
 
-// NewMD5Scanner creates and initializes a new MD5 scanner.
-func NewMD5Scanner(cfg *config.Config) (*md5Scanner, error) {
+// newMD5Scanner creates and initializes a new MD5 scanner.
+func newMD5Scanner(cfg *config.Config) (*md5Scanner, error) {
 	s := &md5Scanner{
 		signatures:     make(map[string]string),
 		allowlistPaths: cfg.Scanner.HashAllowlistPaths,
@@ -84,15 +85,7 @@ func (s *md5Scanner) loadSignatures(filePath string) error {
 
 		if len(parts) == 3 {
 			// Check if parts[1] is a numeric file size (md5v2.dat format)
-			isNumeric := true
-			for _, c := range strings.TrimSpace(parts[1]) {
-				if c < '0' || c > '9' {
-					isNumeric = false
-					break
-				}
-			}
-
-			if isNumeric && strings.TrimSpace(parts[1]) != "" {
+			if _, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil && strings.TrimSpace(parts[1]) != "" {
 				name = strings.TrimSpace(parts[2])
 			} else {
 				// It's likely hash:name where the name contains a colon

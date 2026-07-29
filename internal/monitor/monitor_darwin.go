@@ -13,6 +13,8 @@ import (
 	"github.com/fsnotify/fsevents"
 
 	"github.com/dimaskiddo/lmd-ng/internal/log"
+	"github.com/dimaskiddo/lmd-ng/internal/quarantine"
+	"github.com/dimaskiddo/lmd-ng/internal/util"
 )
 
 // darwinMonitor implements monitorImpl using macOS FSEvents.
@@ -72,16 +74,7 @@ func newPlatformMonitor(m *Monitor) (monitorImpl, error) {
 
 // isExcluded checks if a path falls under any of the configured exclude directories.
 func (dm *darwinMonitor) isExcluded(eventPath string) bool {
-	cleanPath := filepath.Clean(eventPath)
-	for _, excluded := range dm.parent.cfg.Monitor.ExcludeDirs {
-		cleanExcluded := filepath.Clean(excluded)
-
-		if cleanPath == cleanExcluded || strings.HasPrefix(cleanPath, cleanExcluded+string(filepath.Separator)) {
-			return true
-		}
-	}
-
-	return false
+	return util.IsPathExcluded(eventPath, dm.parent.cfg.Monitor.ExcludeDirs)
 }
 
 // handleEvent processes a single FSEvents event.
@@ -89,7 +82,7 @@ func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fse
 	log.Debug("Monitor event received", "path", path, "flags", fmt.Sprintf("0x%x", flags))
 
 	// Exclude quarantine artifacts and temp files
-	if strings.HasSuffix(path, ".enc.tmp") || strings.HasSuffix(path, ".dec.tmp") || strings.HasSuffix(path, ".quarantined") || strings.HasSuffix(path, ".metadata.json") {
+	if quarantine.IsQuarantineArtifact(path) {
 		return
 	}
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/dimaskiddo/lmd-ng/internal/dbs"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
 	"github.com/dimaskiddo/lmd-ng/internal/updater"
 )
@@ -27,6 +28,18 @@ func updateCmd() *cobra.Command {
 			}
 
 			log.Info("Signatures updated successfully.")
+
+			// Notify running DBS server to reload engines
+			client, err := dbs.NewClient(cfg)
+			if err != nil {
+				log.Warn("Could not create DBS client for reload", "error", err)
+			} else {
+				if err := client.SendReload(ctx); err != nil {
+					log.Warn("Could not notify DBS to reload engines (DBS may not be running)", "error", err)
+				} else {
+					log.Info("DBS server notified to reload engines")
+				}
+			}
 		},
 	}
 }

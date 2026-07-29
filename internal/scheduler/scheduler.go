@@ -26,7 +26,6 @@ type UpdateScheduler struct {
 	cron     *cron.Cron
 	updater  *updater.Updater
 	reloader EngineReloader
-	jobID    cron.EntryID
 }
 
 // NewUpdateScheduler creates and initializes the update scheduler.
@@ -40,7 +39,7 @@ func NewUpdateScheduler(cfg *config.Config, u *updater.Updater, reloader EngineR
 
 	if cfg.Scheduler.UpdateInterval != "" {
 		var err error
-		sched.jobID, err = sched.cron.AddFunc(cfg.Scheduler.UpdateInterval, func() {
+		_, err = sched.cron.AddFunc(cfg.Scheduler.UpdateInterval, func() {
 			log.Info("Running scheduled update job")
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -90,7 +89,6 @@ type ScanScheduler struct {
 	cfg       *config.Config
 	cron      *cron.Cron
 	dbsClient *dbs.Client
-	jobID     cron.EntryID
 }
 
 // NewScanScheduler creates and initializes the scan scheduler.
@@ -103,7 +101,7 @@ func NewScanScheduler(cfg *config.Config, dbsClient *dbs.Client) (*ScanScheduler
 
 	if cfg.Scheduler.ScanInterval != "" {
 		var err error
-		sched.jobID, err = sched.cron.AddFunc(cfg.Scheduler.ScanInterval, func() {
+		_, err = sched.cron.AddFunc(cfg.Scheduler.ScanInterval, func() {
 			log.Info("Running scheduled scan job")
 
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)

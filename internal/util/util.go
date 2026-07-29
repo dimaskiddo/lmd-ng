@@ -1,8 +1,10 @@
 package util
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -56,4 +58,26 @@ func HasInternetAccess() bool {
 	conn.Close()
 
 	return true
+}
+
+// IsPathExcluded checks if a path falls under any of the given exclude directories.
+func IsPathExcluded(path string, excludeDirs []string) bool {
+	cleanPath := filepath.Clean(path)
+	for _, excluded := range excludeDirs {
+		cleanExcluded := filepath.Clean(excluded)
+		if cleanPath == cleanExcluded || strings.HasPrefix(cleanPath, cleanExcluded+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckContext returns ctx.Err() if the context is done, nil otherwise.
+func CheckContext(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
 }

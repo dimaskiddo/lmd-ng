@@ -26,6 +26,15 @@ const (
 	chunkSize = 4096  // 4KB chunk size for stream encryption/decryption
 )
 
+// IsQuarantineArtifact returns true if the path belongs to a quarantine temp file
+// or metadata sidecar that should be ignored by the file system monitor.
+func IsQuarantineArtifact(path string) bool {
+	return strings.HasSuffix(path, ".enc.tmp") ||
+		strings.HasSuffix(path, ".dec.tmp") ||
+		strings.HasSuffix(path, ".quarantined") ||
+		strings.HasSuffix(path, ".metadata.json")
+}
+
 // Metadata stores information about a quarantined file.
 // All POSIX file attributes needed for a bit-perfect restore are captured here.
 type Metadata struct {

@@ -24,9 +24,6 @@ import (
 type Updater struct {
 	cfg        *config.Config
 	httpClient *http.Client
-	// OnSignaturesUpdated is called after any signature database has been
-	// successfully updated. The daemon wires this to trigger engine reload.
-	OnSignaturesUpdated func()
 }
 
 // NewUpdater creates and initializes a new Updater.
@@ -80,12 +77,6 @@ func (u *Updater) Update(ctx context.Context) error {
 		} else if didUpdate {
 			updated = true
 		}
-	}
-
-	// If any databases were updated, trigger the reload callback
-	if updated && u.OnSignaturesUpdated != nil {
-		log.Info("Signature databases updated, triggering engine reload")
-		u.OnSignaturesUpdated()
 	}
 
 	log.Info("Update process completed", "signatures_changed", updated)

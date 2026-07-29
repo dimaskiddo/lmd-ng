@@ -77,7 +77,7 @@ flowchart TD
    - `md5v2.dat`, `sha256v2.dat`, `hex.dat` → `<sigs_dir>/dat/`
    - `rfxn.*` → `<sigs_dir>/rfxn/`
 5. All writes atomic (`.tmp` + rename)
-6. `OnSignaturesUpdated` callback → DBS `ReloadEngines()` (swap under `sync.RWMutex`)
+6. Scheduler calls `server.ReloadEngines()` directly after successful update (swap under `sync.RWMutex`)
 
 **ClamAV databases** (when `clamav_update_enabled` + `clamav_enabled`):
 1. Uses `If-Modified-Since` header (304 if unchanged)
@@ -119,6 +119,7 @@ scan command → dbsClient.WaitForServer (30 retries × 2s)
 
 **ScanDataWithEngines** (shared by both paths):
 - Iterates engines sequentially, rewinds reader to byte 0 before each
+- ClamAV engine: hash phase (HDB) → PE section phase (MDB, PE files only) → body phase (NDB)
 - Short-circuits on first positive detection
 
 ### 5. Detection & Quarantine

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
@@ -17,8 +18,8 @@ type sha256Scanner struct {
 	allowlistPaths []string          // path prefixes whose files are exempt from hash matching
 }
 
-// NewSHA256Scanner creates and initializes a new SHA256 scanner.
-func NewSHA256Scanner(cfg *config.Config) (*sha256Scanner, error) {
+// newSHA256Scanner creates and initializes a new SHA256 scanner.
+func newSHA256Scanner(cfg *config.Config) (*sha256Scanner, error) {
 	s := &sha256Scanner{
 		signatures:     make(map[string]string),
 		allowlistPaths: cfg.Scanner.HashAllowlistPaths,
@@ -84,15 +85,7 @@ func (s *sha256Scanner) loadSignatures(filePath string) error {
 
 		if len(parts) == 3 {
 			// Check if parts[1] is a numeric file size (sha256v2.dat format)
-			isNumeric := true
-			for _, c := range strings.TrimSpace(parts[1]) {
-				if c < '0' || c > '9' {
-					isNumeric = false
-					break
-				}
-			}
-
-			if isNumeric && strings.TrimSpace(parts[1]) != "" {
+			if _, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil && strings.TrimSpace(parts[1]) != "" {
 				name = strings.TrimSpace(parts[2])
 			} else {
 				// It's likely hash:name where the name contains a colon

@@ -65,6 +65,35 @@ func (s *MDBStore) PrepareCapacity(totalSigs int) {
 	}
 }
 
+// lookupEntry checks a specific hash map for a matching MDB signature.
+func (s *MDBStore) lookupEntry(m map[string]MDBEntry, hash string, sectionSize int64) (MDBEntry, bool) {
+	entry, ok := m[strings.ToLower(hash)]
+	if !ok {
+		return MDBEntry{}, false
+	}
+
+	if entry.SectionSize != sectionSize {
+		return MDBEntry{}, false
+	}
+
+	return entry, true
+}
+
+// LookupMD5 checks if the given MD5 hash matches a known PE section signature.
+func (s *MDBStore) LookupMD5(hash string, sectionSize int64) (MDBEntry, bool) {
+	return s.lookupEntry(s.MD5Hashes, hash, sectionSize)
+}
+
+// LookupSHA1 checks if the given SHA1 hash matches a known PE section signature.
+func (s *MDBStore) LookupSHA1(hash string, sectionSize int64) (MDBEntry, bool) {
+	return s.lookupEntry(s.SHA1Hashes, hash, sectionSize)
+}
+
+// LookupSHA256 checks if the given SHA256 hash matches a known PE section signature.
+func (s *MDBStore) LookupSHA256(hash string, sectionSize int64) (MDBEntry, bool) {
+	return s.lookupEntry(s.SHA256Hashes, hash, sectionSize)
+}
+
 // LoadMDB parses PE section hash signatures from a reader (content of .mdb or .msb file).
 // Format: PESectionSize:PESectionHash:MalwareName
 // Note: The order is reversed compared to HDB (size comes first, then hash).

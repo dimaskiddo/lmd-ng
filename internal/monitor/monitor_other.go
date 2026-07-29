@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/dimaskiddo/lmd-ng/internal/log"
+	"github.com/dimaskiddo/lmd-ng/internal/quarantine"
+	"github.com/dimaskiddo/lmd-ng/internal/util"
 )
 
 // otherMonitor implements monitorImpl using fsnotify (inotify on Linux,
@@ -44,14 +45,7 @@ func newPlatformMonitor(m *Monitor) (monitorImpl, error) {
 
 // isExcluded checks if a path falls under any of the configured exclude directories.
 func (om *otherMonitor) isExcluded(path string) bool {
-	cleanPath := filepath.Clean(path)
-	for _, excluded := range om.parent.cfg.Monitor.ExcludeDirs {
-		cleanExcluded := filepath.Clean(excluded)
-		if cleanPath == cleanExcluded || strings.HasPrefix(cleanPath, cleanExcluded+string(filepath.Separator)) {
-			return true
-		}
-	}
-	return false
+	return util.IsPathExcluded(path, om.parent.cfg.Monitor.ExcludeDirs)
 }
 
 // addRecursive adds a path and all its subdirectories to the watcher.
@@ -98,7 +92,7 @@ func (om *otherMonitor) addRecursive(path string) error {
 // handleEvent processes a single fsnotify event.
 func (om *otherMonitor) handleEvent(ctx context.Context, name string, op fsnotify.Op) {
 	// Exclude quarantine artifacts and temp files
-	if strings.HasSuffix(name, ".enc.tmp") || strings.HasSuffix(name, ".dec.tmp") || strings.HasSuffix(name, ".quarantined") || strings.HasSuffix(name, ".metadata.json") {
+	if quarantine.IsQuarantineArtifact(name) {
 		return
 	}
 

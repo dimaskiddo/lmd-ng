@@ -128,6 +128,8 @@ Binary wire format: `[1-byte type][4-byte length BE][payload]`
 
 **Limits:** `MaxChunkSize` = 32KB, `MaxPayloadSize` = 1MB. TLS mandatory (`tls.VersionTLS13`, mutual auth).
 
+**Note:** `MsgReloadSignatures`/`MsgReloadAck` enable remote signature reload from a separate update client. Currently unused — scheduler calls `ReloadEngines()` in-process.
+
 ---
 
 ## 3. Scanner (`internal/scanner/`)
@@ -158,7 +160,7 @@ Composed of 4 sub-scanners — scan order: **MD5 → SHA256 → RFXN → HEX**, 
 
 ### ClamAVSignatureEngine
 
-Two-pass scan: **Hash phase** (single-pass MD5+SHA1+SHA256 via `io.MultiWriter`, HDB lookup) → **Body phase** (read to 64KB, NDB pattern matching).
+Three-pass scan: **Hash phase** (single-pass MD5+SHA1+SHA256 via `io.MultiWriter`, HDB lookup) → **PE section phase** (parse PE headers, hash each section, MDB lookup — PE files only) → **Body phase** (read to 64KB, NDB pattern matching).
 
 ### Walker (`internal/scanner/walker.go`)
 
