@@ -1,8 +1,8 @@
 package notifier
 
 import (
-	"fmt"
-	"strings"
+	"context"
+	"errors"
 
 	"github.com/dimaskiddo/lmd-ng/internal/log"
 	"github.com/dimaskiddo/lmd-ng/internal/util"
@@ -10,7 +10,7 @@ import (
 
 // Notifier defines the interface for sending malware detection notifications.
 type Notifier interface {
-	SendQuarantineNotification(filePath, signatureName string) error
+	SendQuarantineNotification(ctx context.Context, filePath, signatureName string) error
 }
 
 // MultiNotifier holds multiple Notifier implementations and broadcasts to all of them.
@@ -27,7 +27,7 @@ func NewMultiNotifier(notifiers ...Notifier) *MultiNotifier {
 
 // SendQuarantineNotification broadcasts the notification to all configured notifiers.
 // It aggregates any errors encountered into a single error.
-func (m *MultiNotifier) SendQuarantineNotification(filePath, signatureName string) error {
+func (m *MultiNotifier) SendQuarantineNotification(ctx context.Context, filePath, signatureName string) error {
 	if len(m.notifiers) == 0 {
 		return nil
 	}
@@ -39,16 +39,16 @@ func (m *MultiNotifier) SendQuarantineNotification(filePath, signatureName strin
 		return nil
 	}
 
-	var errs []string
+	var errs []error
 
 	for _, n := range m.notifiers {
-		if err := n.SendQuarantineNotification(filePath, signatureName); err != nil {
-			errs = append(errs, err.Error())
+		if err := n.SendQuarantineNotification(ctx, filePath, signatureName); err != nil {
+			errs = append(errs, err)
 		}
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("multiple notification errors: %s", strings.Join(errs, "; "))
+		return errors.Join(errs...)
 	}
 
 	return nil

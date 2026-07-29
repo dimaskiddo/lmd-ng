@@ -2,6 +2,7 @@ package notifier
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"html/template"
@@ -69,9 +70,16 @@ func NewEmailNotifier(cfg *config.EmailNotificationConfig) *EmailNotifier {
 }
 
 // SendQuarantineNotification sends an HTML email notification indicating a file was quarantined.
-func (n *EmailNotifier) SendQuarantineNotification(filePath, signatureName string) error {
+func (n *EmailNotifier) SendQuarantineNotification(ctx context.Context, filePath, signatureName string) error {
 	if !n.cfg.Enabled || len(n.cfg.Recipients) == 0 {
 		return nil
+	}
+
+	// Early context cancellation check
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
 	}
 
 	hostname, err := os.Hostname()
@@ -117,7 +125,8 @@ func (n *EmailNotifier) SendQuarantineNotification(filePath, signatureName strin
 			ServerName: n.cfg.SMTPHost,
 		}
 
-		conn, err := tls.Dial("tcp", addr, tlsconfig)
+		dialer := &tls.Dialer{Config: tlsconfig}
+		conn, err := dialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			return fmt.Errorf("failed to connect to SMTP server with TLS: %w", err)
 		}

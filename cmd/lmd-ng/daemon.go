@@ -277,7 +277,6 @@ quarantine locally. The DBS server must be running before starting RTP.`,
 	}
 }
 
-
 func handleConfigReload(ctx context.Context) {
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)

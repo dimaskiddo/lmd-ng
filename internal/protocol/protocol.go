@@ -274,8 +274,8 @@ func readString(data []byte, offset int) (string, int, error) {
 
 // StatusData carries engine and signature statistics from the DBS server.
 type StatusData struct {
-	EngineNames       []string        `json:"engine_names"`
-	SignatureCounts   map[string]int  `json:"signature_counts"`
+	EngineNames         []string       `json:"engine_names"`
+	SignatureCounts     map[string]int `json:"signature_counts"`
 	CVDDatabaseVersions map[string]int `json:"cvd_database_versions,omitempty"`
 }
 

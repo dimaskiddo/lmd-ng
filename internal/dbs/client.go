@@ -32,7 +32,8 @@ const (
 // reducing GC pressure during concurrent scans.
 var scanBufPool = sync.Pool{
 	New: func() any {
-		return make([]byte, protocol.MaxChunkSize)
+		buf := make([]byte, protocol.MaxChunkSize)
+		return &buf
 	},
 }
 
@@ -288,8 +289,9 @@ func (c *Client) attemptScanFile(ctx context.Context, filePath string, fileSize 
 	}
 
 	// Stream file data in chunks using pooled buffer
-	buf := scanBufPool.Get().([]byte)
-	defer scanBufPool.Put(buf)
+	bufPtr := scanBufPool.Get().(*[]byte)
+	defer scanBufPool.Put(bufPtr)
+	buf := *bufPtr
 
 	for {
 		select {

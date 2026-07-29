@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
@@ -16,13 +15,13 @@ import (
 
 // hexSignatureEntry represents a single hex pattern signature.
 type hexSignatureEntry struct {
-	pattern       []byte         // Hex pattern decoded to bytes (wildcard positions = 0x00)
-	fixed         bool           // True if no wildcards — fast bytes.Contains path
-	hasWildcards  bool           // True if pattern contains ?? wildcards
-	wildcardPos   []int          // Byte offsets in pattern where ?? appears (0 = any byte)
-	wildcardCount int            // Number of ?? wildcards
-	patternStr    string         // Original hex string for regex fallback
-	name          string         // Name of the signature
+	pattern       []byte // Hex pattern decoded to bytes (wildcard positions = 0x00)
+	fixed         bool   // True if no wildcards — fast bytes.Contains path
+	hasWildcards  bool   // True if pattern contains ?? wildcards
+	wildcardPos   []int  // Byte offsets in pattern where ?? appears (0 = any byte)
+	wildcardCount int    // Number of ?? wildcards
+	patternStr    string // Original hex string for regex fallback
+	name          string // Name of the signature
 }
 
 // hexScanner is responsible for loading and checking hex signatures.
@@ -173,11 +172,11 @@ func compileHexSignature(patternHex, name string) (*hexSignatureEntry, error) {
 		}
 
 		return &hexSignatureEntry{
-			pattern:       decoded,
-			fixed:         true,
-			hasWildcards:  false,
-			patternStr:    patternHex,
-			name:          name,
+			pattern:      decoded,
+			fixed:        true,
+			hasWildcards: false,
+			patternStr:   patternHex,
+			name:         name,
 		}, nil
 	}
 
@@ -360,100 +359,4 @@ func (s *hexScanner) Check(content []byte, filePath string) []string {
 	}
 
 	return matchedSigs
-}
-
-// hexWildcardMatchRegex is an alternative regex-based matcher for complex patterns.
-// Currently unused — the segment-based matcher above is faster for ?? wildcards.
-// Kept for future use if nibble wildcards or {n-m} ranges are needed.
-func hexWildcardMatchRegex(content []byte, patternHex string) bool {
-	// Convert ClamAV hex to Go regex (reusing pkg/clamav's approach)
-	regexStr := clamHexToGoRegex(patternHex)
-	if regexStr == "" {
-		return false
-	}
-
-	re, err := regexp.Compile(regexStr)
-	if err != nil {
-		return false
-	}
-
-	return re.Match(content)
-}
-
-// clamHexToGoRegex converts a ClamAV-style hex pattern to a Go byte regex.
-// Handles: ?? → ., hex pairs → literal bytes, nibble wildcards → character classes.
-func clamHexToGoRegex(patternHex string) string {
-	var result strings.Builder
-	result.WriteString("(?s)")
-
-	for i := 0; i < len(patternHex); {
-		if i+1 >= len(patternHex) {
-			break
-		}
-
-		high := patternHex[i]
-		low := patternHex[i+1]
-
-		switch {
-		case high == '?' && low == '?':
-			result.WriteString("(?s:.)")
-			i += 2
-
-		case high == '?':
-			// Low nibble fixed — 16 possible bytes
-			lowVal, ok := hexNibbleValue(low)
-			if !ok {
-				return ""
-			}
-
-			result.WriteByte('(')
-			for h := byte(0); h < 16; h++ {
-				if h > 0 {
-					result.WriteByte('|')
-				}
-
-				result.WriteString(fmt.Sprintf("\\x%02x", (h<<4)|lowVal))
-			}
-
-			result.WriteByte(')')
-			i += 2
-
-		case low == '?':
-			// High nibble fixed — 16 possible bytes
-			highVal, ok := hexNibbleValue(high)
-			if !ok {
-				return ""
-			}
-
-			lowByte := highVal << 4
-			highByte := (highVal << 4) | 15
-			result.WriteString(fmt.Sprintf("[\\x%02x-\\x%02x]", lowByte, highByte))
-			i += 2
-
-		default:
-			v, err := hex.DecodeString(string([]byte{high, low}))
-			if err != nil {
-				return ""
-			}
-
-			result.WriteString(fmt.Sprintf("\\x%02x", v[0]))
-			i += 2
-		}
-	}
-
-	return result.String()
-}
-
-// hexNibbleValue converts a hex character to its numeric value (0-15).
-func hexNibbleValue(c byte) (byte, bool) {
-	switch {
-	case c >= '0' && c <= '9':
-		return c - '0', true
-	case c >= 'a' && c <= 'f':
-		return c - 'a' + 10, true
-	case c >= 'A' && c <= 'F':
-		return c - 'A' + 10, true
-	default:
-		return 0, false
-	}
 }

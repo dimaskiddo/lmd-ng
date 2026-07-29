@@ -28,10 +28,10 @@ type CVDHeader struct {
 // ClamAVSignatureDB represents the complete in-memory database of ClamAV signatures
 // loaded from one or more CVD/CLD files or flat signature files.
 type ClamAVSignatureDB struct {
-	HDB         *HDBStore              // File hash signatures (.hdb, .hsb)
-	MDB         *MDBStore              // PE section hash signatures (.mdb, .msb)
-	NDB         *NDBStore              // Body/extended signatures (.ndb)
-	CVDVersions map[string]CVDHeader   // CVD filename -> parsed header metadata
+	HDB         *HDBStore            // File hash signatures (.hdb, .hsb)
+	MDB         *MDBStore            // PE section hash signatures (.mdb, .msb)
+	NDB         *NDBStore            // Body/extended signatures (.ndb)
+	CVDVersions map[string]CVDHeader // CVD filename -> parsed header metadata
 }
 
 // NewClamAVSignatureDB creates a new empty ClamAVSignatureDB.

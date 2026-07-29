@@ -2,6 +2,7 @@ package notifier
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -25,7 +26,7 @@ func NewTelegramNotifier(cfg *config.TelegramNotificationConfig) *TelegramNotifi
 }
 
 // SendQuarantineNotification sends an HTML formatted message to Telegram indicating a file was quarantined.
-func (n *TelegramNotifier) SendQuarantineNotification(filePath, signatureName string) error {
+func (n *TelegramNotifier) SendQuarantineNotification(ctx context.Context, filePath, signatureName string) error {
 	if !n.cfg.Enabled || n.cfg.BotToken == "" || n.cfg.ChatID == "" {
 		return nil
 	}
@@ -60,7 +61,7 @@ func (n *TelegramNotifier) SendQuarantineNotification(filePath, signatureName st
 	}
 
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", n.cfg.BotToken)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		return fmt.Errorf("failed to create telegram request: %w", err)
 	}

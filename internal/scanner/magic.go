@@ -62,40 +62,6 @@ func isNativeExecutable(magicType int) bool {
 	return magicType == magicTypeELF || magicType == magicTypeMachO
 }
 
-// winTargetedPrefixes are the signature name prefixes that unambiguously
-// indicate a Windows-targeted threat. HEX signatures whose names start with
-// any of these prefixes are skipped when scanning ELF / Mach-O files.
-// Covers ClamAV naming convention: {platform}.{category}.{name}
-var winTargetedPrefixes = []string{
-	"Win.",
-	"W32.",
-	"W64.",
-	"Win32.",
-	"Win64.",
-	"Dos.",
-	"Worm.Win",
-	"Backdoor.Win",
-	"Trojan.Win",
-	"Adware.Win",
-	"Spyware.Win",
-	"Ransom.Win",
-	"Exploit.Win",
-	"Downloader.Win",
-	"Dropper.Win",
-}
-
-// isWindowsTargetedSig returns true if the signature name begins with any of
-// the well-known Windows-targeted threat family prefixes.
-func isWindowsTargetedSig(name string) bool {
-	for _, prefix := range winTargetedPrefixes {
-		if len(name) >= len(prefix) && name[:len(prefix)] == prefix {
-			return true
-		}
-	}
-
-	return false
-}
-
 // unixTargetedPrefixes are the signature name prefixes that indicate a
 // Unix/Linux/macOS-targeted threat. HEX signatures whose names start with
 // any of these prefixes are kept when scanning ELF / Mach-O files.
