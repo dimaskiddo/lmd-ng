@@ -148,7 +148,11 @@ func (om *otherMonitor) Start(ctx context.Context) error {
 			if !ok {
 				return fmt.Errorf("fsnotify event channel closed")
 			}
-			go om.handleEvent(ctx, event.Name, event.Op)
+			om.parent.sem <- struct{}{}
+			go func() {
+				defer func() { <-om.parent.sem }()
+				om.handleEvent(ctx, event.Name, event.Op)
+			}()
 
 		case err, ok := <-om.watcher.Errors:
 			if !ok {

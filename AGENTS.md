@@ -36,12 +36,12 @@ Rewrite Linux Malware Detect (LMD/Maldet) from Bash into a modern Golang applica
 
 ## Signature Types
 
-| Format | Source | Status |
-|---|---|---|
-| MD5/SHA256 hashes | LMD native | Active |
-| HEX (hex-string) signatures | LMD native | Active |
-| RFXN (NDB hex-pattern) | LMD native via `pkg/clamav` NDB parser | Active |
-| ClamAV `.cvd`/`.cld`/`.ndb`/`.mdb`/`.hdb` | ClamAV | Implemented — pure-Go loader in `pkg/clamav/`, off by default (`clamav_enabled: false`) |
+| Format | Source |
+|---|---|
+| MD5/SHA256 hashes | LMD native |
+| HEX (hex-string) signatures | LMD native |
+| RFXN (NDB hex-pattern) | LMD native via `pkg/clamav` NDB parser |
+| ClamAV `.cvd`/`.cld`/`.ndb`/`.mdb`/`.hdb` | ClamAV |
 
 ## CLI
 

@@ -109,7 +109,9 @@ func UninstallLegacyService() error {
 	log.Info("Migrating legacy monolithic service", "service", legacyServiceName, "status", status)
 
 	// Stop the legacy service (best-effort)
-	_ = svc.Stop()
+	if err := svc.Stop(); err != nil {
+		log.Warn("Failed to stop legacy service during migration", "service", legacyServiceName, "error", err)
+	}
 
 	// Uninstall the legacy service
 	if err := svc.Uninstall(); err != nil {
@@ -159,7 +161,9 @@ func UninstallService(_ *config.Config, comp Component) error {
 	}
 
 	// Stop is best-effort; a stopped service can still be uninstalled cleanly.
-	_ = svc.Stop()
+	if err := svc.Stop(); err != nil {
+		log.Warn("Failed to stop service before uninstall", "service", comp, "error", err)
+	}
 
 	if err = svc.Uninstall(); err != nil {
 		return fmt.Errorf("failed to uninstall service %s: %w", comp, err)

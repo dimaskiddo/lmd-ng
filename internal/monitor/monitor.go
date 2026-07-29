@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/notifier"
@@ -23,6 +24,7 @@ type Monitor struct {
 	scanFunc ScanFunc
 	notifier notifier.Notifier
 	impl     monitorImpl
+	sem      chan struct{} // bounded concurrency for event handlers
 }
 
 // monitorImpl is the platform-specific monitor backend.
@@ -36,10 +38,13 @@ type monitorImpl interface {
 // NewMonitor creates and initializes a new file system monitor.
 // The scanFunc callback is invoked for each file event that requires scanning.
 func NewMonitor(cfg *config.Config, scanFunc ScanFunc, n notifier.Notifier) (*Monitor, error) {
+	// Bound concurrent event handlers to avoid goroutine explosion under burst
+	maxConcurrent := runtime.NumCPU() * 2
 	m := &Monitor{
 		cfg:      cfg,
 		scanFunc: scanFunc,
 		notifier: n,
+		sem:      make(chan struct{}, maxConcurrent),
 	}
 
 	impl, err := newPlatformMonitor(m)

@@ -113,8 +113,8 @@ func (u *Updater) updateLMDSignatures(ctx context.Context) (bool, error) {
 
 	log.Info("New LMD signature version found", "current", currentVer, "remote", remoteVer)
 
-	// Download signature package to a temp file
-	packagePath := filepath.Join(os.TempDir(), filepath.Base(u.cfg.Updater.SignaturePackURL))
+	// Download signature package to a temp file within the configured signatures directory
+	packagePath := filepath.Join(u.cfg.App.SignaturesDir, filepath.Base(u.cfg.Updater.SignaturePackURL)+".tmp")
 	if err := u.downloadFile(ctx, u.cfg.Updater.SignaturePackURL, packagePath); err != nil {
 		return false, fmt.Errorf("failed to download signature package from %s: %w", u.cfg.Updater.SignaturePackURL, err)
 	}
@@ -384,7 +384,8 @@ func (u *Updater) extractTarGz(archivePath, destDir string) error {
 		}
 
 		name := header.Name
-		sigDirName := filepath.Base(u.cfg.App.SignaturesDir) + "/"
+		// Tar entries always use forward slashes regardless of OS
+		sigDirName := filepath.ToSlash(filepath.Base(u.cfg.App.SignaturesDir)) + "/"
 		if after, ok := strings.CutPrefix(name, sigDirName); ok {
 			name = after
 		}

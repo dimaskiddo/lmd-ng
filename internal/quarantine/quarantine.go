@@ -161,7 +161,9 @@ func (qm *QuarantineManager) Quarantine(ctx context.Context, filePath string, de
 
 			encryptedFileKey, err := qm.encryptKeyWithMaster(fileKey, masterKey)
 			if err != nil {
-				_ = os.Remove(quarantinePath)
+				if removeErr := os.Remove(quarantinePath); removeErr != nil {
+					log.Debug("Failed to remove quarantine file during key encrypt error cleanup", "file", quarantinePath, "error", removeErr)
+				}
 				return "", fmt.Errorf("failed to encrypt file key with master key: %w", err)
 			}
 
@@ -187,13 +189,19 @@ func (qm *QuarantineManager) Quarantine(ctx context.Context, filePath string, de
 	metadataBytes, err := json.MarshalIndent(metadata, "", "  ")
 
 	if err != nil {
-		_ = os.Remove(finalQuarantinePath)
+		if removeErr := os.Remove(finalQuarantinePath); removeErr != nil {
+			log.Debug("Failed to remove quarantine file during metadata marshal error cleanup", "file", finalQuarantinePath, "error", removeErr)
+		}
 		return "", fmt.Errorf("failed to marshal quarantine metadata: %w", err)
 	}
 
 	if err := os.WriteFile(metadataFilePath, metadataBytes, 0o600); err != nil {
-		_ = os.Remove(finalQuarantinePath)
-		_ = os.Remove(metadataFilePath)
+		if removeErr := os.Remove(finalQuarantinePath); removeErr != nil {
+			log.Debug("Failed to remove quarantine file during metadata write error cleanup", "file", finalQuarantinePath, "error", removeErr)
+		}
+		if removeErr := os.Remove(metadataFilePath); removeErr != nil {
+			log.Debug("Failed to remove metadata file during write error cleanup", "file", metadataFilePath, "error", removeErr)
+		}
 		return "", fmt.Errorf("failed to write quarantine metadata file: %w", err)
 	}
 
@@ -514,7 +522,9 @@ func (qm *QuarantineManager) encryptFile(filePath string, key []byte) (string, [
 		if n > 0 {
 			sealed := gcm.Seal(nil, nonce, buffer[:n], nil)
 			if _, writeErr := ciphertextFile.Write(sealed); writeErr != nil {
-				_ = os.Remove(encryptedTempFilePath)
+				if removeErr := os.Remove(encryptedTempFilePath); removeErr != nil {
+					log.Debug("Failed to remove encrypted temp file during write error cleanup", "file", encryptedTempFilePath, "error", removeErr)
+				}
 				return "", nil, fmt.Errorf("failed to write encrypted chunk: %w", writeErr)
 			}
 		}
@@ -524,7 +534,9 @@ func (qm *QuarantineManager) encryptFile(filePath string, key []byte) (string, [
 		}
 
 		if err != nil {
-			_ = os.Remove(encryptedTempFilePath)
+			if removeErr := os.Remove(encryptedTempFilePath); removeErr != nil {
+				log.Debug("Failed to remove encrypted temp file during read error cleanup", "file", encryptedTempFilePath, "error", removeErr)
+			}
 			return "", nil, fmt.Errorf("failed to read plaintext file chunk: %w", err)
 		}
 	}
@@ -572,11 +584,15 @@ func (qm *QuarantineManager) decryptFile(filePath string, key []byte, nonce []by
 		if n > 0 {
 			opened, openErr := gcm.Open(nil, nonce, buffer[:n], nil)
 			if openErr != nil {
-				_ = os.Remove(decryptedTempFilePath)
+				if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {
+					log.Debug("Failed to remove decrypted temp file during decrypt error cleanup", "file", decryptedTempFilePath, "error", removeErr)
+				}
 				return "", fmt.Errorf("failed to decrypt chunk: %w", openErr)
 			}
 			if _, writeErr := plaintextFile.Write(opened); writeErr != nil {
-				_ = os.Remove(decryptedTempFilePath)
+				if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {
+					log.Debug("Failed to remove decrypted temp file during write error cleanup", "file", decryptedTempFilePath, "error", removeErr)
+				}
 				return "", fmt.Errorf("failed to write decrypted chunk: %w", writeErr)
 			}
 		}
@@ -586,7 +602,9 @@ func (qm *QuarantineManager) decryptFile(filePath string, key []byte, nonce []by
 		}
 
 		if err != nil {
-			_ = os.Remove(decryptedTempFilePath)
+			if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {
+				log.Debug("Failed to remove decrypted temp file during read error cleanup", "file", decryptedTempFilePath, "error", removeErr)
+			}
 			return "", fmt.Errorf("failed to read ciphertext chunk: %w", err)
 		}
 	}
@@ -678,12 +696,16 @@ func moveFile(src, dst string) error {
 	defer dstFile.Close()
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
-		_ = os.Remove(dst)
+		if removeErr := os.Remove(dst); removeErr != nil {
+			log.Debug("Failed to remove destination file during copy error cleanup", "file", dst, "error", removeErr)
+		}
 		return fmt.Errorf("failed to copy file content: %w", err)
 	}
 
 	if err := dstFile.Sync(); err != nil {
-		_ = os.Remove(dst)
+		if removeErr := os.Remove(dst); removeErr != nil {
+			log.Debug("Failed to remove destination file during sync error cleanup", "file", dst, "error", removeErr)
+		}
 		return fmt.Errorf("failed to sync destination file: %w", err)
 	}
 

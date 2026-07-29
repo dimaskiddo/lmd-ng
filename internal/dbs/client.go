@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
@@ -26,6 +27,14 @@ const (
 	// maxPingRetries is the maximum number of Ping retries before giving up.
 	maxPingRetries = 30
 )
+
+// scanBufPool reuses byte buffers for streaming file chunks to DBS,
+// reducing GC pressure during concurrent scans.
+var scanBufPool = sync.Pool{
+	New: func() any {
+		return make([]byte, protocol.MaxChunkSize)
+	},
+}
 
 // Client connects to the DBS server to stream files for signature matching.
 // It opens a new TLS connection per operation (scan, ping, reload) to keep
@@ -277,8 +286,10 @@ func (c *Client) attemptScanFile(ctx context.Context, filePath string, fileSize 
 		return nil, fmt.Errorf("failed to send scan request for %s: %w", filePath, err)
 	}
 
-	// Stream file data in chunks
-	buf := make([]byte, protocol.MaxChunkSize)
+	// Stream file data in chunks using pooled buffer
+	buf := scanBufPool.Get().([]byte)
+	defer scanBufPool.Put(buf)
+
 	for {
 		select {
 		case <-ctx.Done():

@@ -2,7 +2,6 @@ package clamav
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -160,6 +159,13 @@ func (db *ClamAVSignatureDB) loadCVD(filePath string) error {
 			"sigs", cvdHeader.NumSigs,
 			"flevel", cvdHeader.FLevel,
 			"builder", cvdHeader.Builder)
+
+		// Pre-allocate signature stores using known count from header
+		if cvdHeader.NumSigs > 0 {
+			db.HDB.PrepareCapacity(cvdHeader.NumSigs)
+			db.MDB.PrepareCapacity(cvdHeader.NumSigs)
+			db.NDB.PrepareCapacity(cvdHeader.NumSigs)
+		}
 	}
 
 	// The rest of the file is a tar.gz archive.
@@ -230,15 +236,9 @@ func (db *ClamAVSignatureDB) extractAndLoadTar(r io.Reader, sourcePath string) e
 			continue
 		}
 
-		// Read the file content into a memory buffer
-		var buf bytes.Buffer
-		if _, err := io.Copy(&buf, tarReader); err != nil {
-			slog.Warn("Failed to read signature file from CVD archive, skipping", "file", name, "cvd", sourcePath, "error", err)
-			continue
-		}
-
+		// Stream the file content directly to the parser — no intermediate buffer
 		sourceName := fmt.Sprintf("%s:%s", filepath.Base(sourcePath), name)
-		if err := db.loadSignatureReader(&buf, sourceName, sigType); err != nil {
+		if err := db.loadSignatureReader(tarReader, sourceName, sigType); err != nil {
 			slog.Warn("Failed to load signature file from CVD archive, skipping", "file", name, "cvd", sourcePath, "error", err)
 		}
 	}

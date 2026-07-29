@@ -89,7 +89,7 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 	}
 
 	_, err := io.Copy(multiWriter, r)
-	if err != nil && err != io.EOF {
+	if err != nil {
 		return nil, fmt.Errorf("failed to calculate hash: %w", err)
 	}
 
@@ -161,7 +161,7 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 
 			limitedReader := io.LimitReader(r, hexDepth)
 			content, err := io.ReadAll(limitedReader)
-			if err != nil && err != io.EOF {
+			if err != nil {
 				return nil, fmt.Errorf("failed to read content for RFXN NDB scan: %w", err)
 			}
 
@@ -175,30 +175,44 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 					DetectionID:   fmt.Sprintf("rfxn.ndb.%s", ndbMatches[0]),
 				}}, nil
 			}
+
+			// Reuse content buffer for HEX scan — no second read needed
+			hexMatches := s.hexScanner.Check(content, filePath)
+			if len(hexMatches) > 0 {
+				return []*ScanResult{{
+					SignatureName: hexMatches[0],
+					SignatureType: "HEX",
+					FilePath:      filePath,
+					DetectionID:   fmt.Sprintf("hex.%s", hexMatches[0]),
+				}}, nil
+			}
+		} else {
+			// No NDB signatures — read content for HEX scan only
+			if _, err := r.Seek(0, io.SeekStart); err != nil {
+				return nil, fmt.Errorf("failed to seek reader to start for HEX scan: %w", err)
+			}
+
+			hexDepth := int64(s.cfg.Scanner.HexDepth)
+			if hexDepth <= 0 {
+				hexDepth = 65536
+			}
+
+			limitedReader := io.LimitReader(r, hexDepth)
+			content, err := io.ReadAll(limitedReader)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read content for HEX scan: %w", err)
+			}
+
+			hexMatches := s.hexScanner.Check(content, filePath)
+			if len(hexMatches) > 0 {
+				return []*ScanResult{{
+					SignatureName: hexMatches[0],
+					SignatureType: "HEX",
+					FilePath:      filePath,
+					DetectionID:   fmt.Sprintf("hex.%s", hexMatches[0]),
+				}}, nil
+			}
 		}
-	}
-
-	// --- HEX Scanning ---
-	if _, err := r.Seek(0, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("failed to seek reader to start for HEX scan: %w", err)
-	}
-
-	hexReadCloser := io.NopCloser(io.LimitReader(r, int64(s.cfg.Scanner.HexDepth)))
-
-	hexContent, err := io.ReadAll(hexReadCloser)
-	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("failed to read content for HEX scan: %w", err)
-	}
-
-	hexMatches := s.hexScanner.Check(hexContent, filePath)
-	if len(hexMatches) > 0 {
-		// Return only the first HEX match
-		return []*ScanResult{{
-			SignatureName: hexMatches[0],
-			SignatureType: "HEX",
-			FilePath:      filePath,
-			DetectionID:   fmt.Sprintf("hex.%s", hexMatches[0]),
-		}}, nil
 	}
 
 	return nil, nil

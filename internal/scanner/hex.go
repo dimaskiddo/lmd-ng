@@ -1,10 +1,10 @@
 package scanner
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +27,9 @@ type hexScanner struct {
 // NewHexScanner creates and initializes a new hex scanner.
 func NewHexScanner(cfg *config.Config) (*hexScanner, error) {
 	s := &hexScanner{
-		signatures: make([]hexSignatureEntry, 0),
+		// Pre-allocate with reasonable initial capacity; no hard limit —
+		// append() grows the slice unboundedly for large signature sets.
+		signatures: make([]hexSignatureEntry, 0, 50000),
 	}
 
 	datDir := filepath.Join(cfg.App.SignaturesDir, "dat")
@@ -68,16 +70,13 @@ func (s *hexScanner) loadSignatures(filePath string) error {
 	}
 	defer file.Close()
 
-	// Read file content in chunks to avoid loading large files entirely into memory
-	// A larger buffer might be needed for very large signature files, but 1MB is a reasonable start.
-	reader := bytes.NewBuffer(make([]byte, 0, 1024*1024))
-	if _, err := io.Copy(reader, file); err != nil {
-		return fmt.Errorf("failed to read HEX signature file %s content: %w", filePath, err)
-	}
+	// Buffer: initial 64KB, max 1MB per line. This limits individual line
+	// length, NOT the total number of signatures — all lines are still read.
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	lines := strings.Split(reader.String(), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if len(line) == 0 || strings.HasPrefix(line, "#") {
 			continue
 		}

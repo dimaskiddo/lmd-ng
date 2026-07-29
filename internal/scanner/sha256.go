@@ -1,9 +1,8 @@
 package scanner
 
 import (
-	"bytes"
+	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,14 +62,13 @@ func (s *sha256Scanner) loadSignatures(filePath string) error {
 	}
 	defer file.Close()
 
-	reader := bytes.NewBuffer(make([]byte, 0, 1024*1024)) // 1MB buffer
-	if _, err := io.Copy(reader, file); err != nil {
-		return fmt.Errorf("failed to read SHA256 signature file %s content: %w", filePath, err)
-	}
+	// Buffer: initial 64KB, max 1MB per line. This limits individual line
+	// length, NOT the total number of signatures — all lines are still read.
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	lines := strings.Split(reader.String(), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if len(line) == 0 || strings.HasPrefix(line, "#") {
 			continue
 		}

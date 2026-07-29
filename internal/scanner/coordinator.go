@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -103,9 +104,10 @@ func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string, qMgr 
 	// Limit concurrent scanning goroutines based on CPULimit.
 	// We use a factor (e.g., 2x) to keep the CPU saturated while waiting for I/O,
 	// but restrict it enough to prevent unbounded CPU spikes and memory exhaustion.
+	// 0 = auto-detect (use all CPU cores).
 	maxWorkers := sc.cfg.Scanner.CPULimit
 	if maxWorkers < 1 {
-		maxWorkers = 1
+		maxWorkers = runtime.NumCPU()
 	}
 
 	maxConcurrency := maxWorkers * 2

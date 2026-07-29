@@ -116,6 +116,14 @@ func (s *NDBStore) TotalCount() int {
 	return len(s.Signatures)
 }
 
+// PrepareCapacity pre-allocates the signatures slice if empty.
+// No signature count limit is imposed — append() grows the slice unboundedly.
+func (s *NDBStore) PrepareCapacity(n int) {
+	if len(s.Signatures) == 0 && n > 0 {
+		s.Signatures = make([]*NDBSignature, 0, n)
+	}
+}
+
 // LoadNDB parses body signatures from a reader (content of .ndb file).
 // Format: MalwareName:TargetType:Offset:HexSignature[:MinFL[:MaxFL]]
 func (s *NDBStore) LoadNDB(r io.Reader, sourceName string) error {
@@ -463,10 +471,9 @@ func clamHexToRegex(hexSig string) (string, error) {
 			}
 			i += 2
 
-		// Handle '!' (negation) — skip for now, rare in signatures
+		// Handle '!' (negation) — not yet supported; return error to avoid false positives
 		case c == '!':
-			// Negation prefix for alternates, advance to next char
-			i++
+			return "", fmt.Errorf("negation operator '!' not supported in hex patterns at position %d", i)
 
 		default:
 			return "", fmt.Errorf("unexpected character '%c' at position %d", c, i)

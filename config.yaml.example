@@ -22,6 +22,8 @@ server:
   network: "unix"                    # "unix" (default) or "tcp"
   socket_path: "./lmd-ng.sock"       # Unix socket path (used when network=unix)
   address: "127.0.0.1:7890"          # TCP listen address (used when network=tcp)
+  socket_backlog: 1024               # Listen backlog for DBS server socket
+  connection_pool_limit: 256         # Max reusable DBS client connections
   stream_buffer_limit: "10M"
   tls:
     # TLS is always enabled (no toggle) to prevent payload tampering
@@ -55,12 +57,14 @@ scanner:
   max_filesize: 20M
   max_depth: 0
   hex_depth: 20000
-  cpu_limit: 0
+  cpu_limit: 0                        # 0 = auto-detect (uses all CPU cores)
+  concurrency_limit: 192             # Max concurrent DBS scan requests (DBS client path)
   ignore_root: false
   ignore_users: []
   ignore_groups: []
   include_regex: ""
   exclude_regex: ""
+  hash_allowlist_paths: []            # Suppress MD5/SHA256 detections under these path prefixes
 
 scheduler:
   update_interval: "@daily"
@@ -68,6 +72,7 @@ scheduler:
 
 updater:
   auto_update_signatures: true
+  remote_uri_timeout: "30s"           # HTTP client timeout for signature downloads
   signature_pack_url: "https://cdn.rfxn.com/downloads/maldet-sigpack.tgz"
   signature_version_url: "https://cdn.rfxn.com/downloads/maldet.sigs.ver"
   clamav_update_enabled: false
@@ -91,5 +96,5 @@ notification:
 
   telegram:
     enabled: false
-    bot_token: "YOUR-TELEGRAM-BOT-TOKEN"
-    chat_id: "YOUR-TELEGRAM-CHAT-ID"
+    bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
+    chat_id: "YOUR_TELEGRAM_CHAT_ID"

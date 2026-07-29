@@ -25,16 +25,49 @@ type HDBStore struct {
 
 // NewHDBStore creates a new empty HDBStore.
 func NewHDBStore() *HDBStore {
+	return NewHDBStoreWithCapacity(0)
+}
+
+// NewHDBStoreWithCapacity creates an HDBStore with pre-allocated map capacity.
+// Pass the expected total number of signatures from CVD headers; 0 uses defaults.
+// This is a memory optimization hint only — it does NOT cap the number of
+// signatures. Maps grow unboundedly via normal assignment regardless of the
+// initial capacity hint. Billion-entry databases load without artificial limits.
+func NewHDBStoreWithCapacity(totalSigs int) *HDBStore {
+	// Distribute capacity roughly equally across three hash types
+	cap := totalSigs / 3
+	if cap < 1024 {
+		cap = 1024
+	}
 	return &HDBStore{
-		MD5Hashes:    make(map[string]HashEntry),
-		SHA1Hashes:   make(map[string]HashEntry),
-		SHA256Hashes: make(map[string]HashEntry),
+		MD5Hashes:    make(map[string]HashEntry, cap),
+		SHA1Hashes:   make(map[string]HashEntry, cap),
+		SHA256Hashes: make(map[string]HashEntry, cap),
 	}
 }
 
 // TotalCount returns the total number of hash signatures loaded across all types.
 func (s *HDBStore) TotalCount() int {
 	return len(s.MD5Hashes) + len(s.SHA1Hashes) + len(s.SHA256Hashes)
+}
+
+// PrepareCapacity pre-allocates maps with the given capacity if they are empty.
+// This avoids rehashing when loading large CVD files with known signature counts.
+// No signature count limit is imposed — maps grow unboundedly via normal assignment.
+func (s *HDBStore) PrepareCapacity(totalSigs int) {
+	cap := totalSigs / 3
+	if cap < 1024 {
+		cap = 1024
+	}
+	if len(s.MD5Hashes) == 0 {
+		s.MD5Hashes = make(map[string]HashEntry, cap)
+	}
+	if len(s.SHA1Hashes) == 0 {
+		s.SHA1Hashes = make(map[string]HashEntry, cap)
+	}
+	if len(s.SHA256Hashes) == 0 {
+		s.SHA256Hashes = make(map[string]HashEntry, cap)
+	}
 }
 
 // LoadHDB parses hash signatures from a reader (content of .hdb or .hsb file).

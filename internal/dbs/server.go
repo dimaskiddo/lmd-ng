@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -112,6 +113,9 @@ func (s *Server) ReloadEngines() error {
 	s.mu.Lock()
 	s.engines = newEngines
 	s.mu.Unlock()
+
+	// Hint Go GC to collect old engine data promptly
+	runtime.GC()
 
 	engineNames := make([]string, len(newEngines))
 	for i, e := range newEngines {

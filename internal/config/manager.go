@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/spf13/viper"
 
@@ -38,6 +39,7 @@ func executableDir() string {
 
 // Manager handles loading, parsing, and watching configuration.
 type Manager struct {
+	mu     sync.RWMutex
 	Viper  *viper.Viper
 	Config *Config
 }
@@ -161,19 +163,17 @@ func (m *Manager) ReloadConfig() error {
 		return fmt.Errorf("failed to unmarshal reloaded config: %w", err)
 	}
 
-	m.Config = newConfig
-
-	if !filepath.IsAbs(m.Config.App.BasePath) {
-		m.Config.App.BasePath = filepath.Join(executableDir(), m.Config.App.BasePath)
+	if !filepath.IsAbs(newConfig.App.BasePath) {
+		newConfig.App.BasePath = filepath.Join(executableDir(), newConfig.App.BasePath)
 	}
 
-	m.Config.ResolvePaths()
+	newConfig.ResolvePaths()
 
 	appDirs := []string{
-		m.Config.App.SignaturesDir,
-		m.Config.App.ClamAVDir,
-		m.Config.App.QuarantineDir,
-		filepath.Dir(m.Config.Logging.FilePath),
+		newConfig.App.SignaturesDir,
+		newConfig.App.ClamAVDir,
+		newConfig.App.QuarantineDir,
+		filepath.Dir(newConfig.Logging.FilePath),
 	}
 
 	for _, dir := range appDirs {
@@ -181,7 +181,7 @@ func (m *Manager) ReloadConfig() error {
 			absDir, err := filepath.Abs(dir)
 			if err == nil {
 				exists := false
-				for _, e := range m.Config.Monitor.ExcludeDirs {
+				for _, e := range newConfig.Monitor.ExcludeDirs {
 					if e == absDir {
 						exists = true
 						break
@@ -189,11 +189,15 @@ func (m *Manager) ReloadConfig() error {
 				}
 
 				if !exists {
-					m.Config.Monitor.ExcludeDirs = append(m.Config.Monitor.ExcludeDirs, absDir)
+					newConfig.Monitor.ExcludeDirs = append(newConfig.Monitor.ExcludeDirs, absDir)
 				}
 			}
 		}
 	}
+
+	m.mu.Lock()
+	m.Config = newConfig
+	m.mu.Unlock()
 
 	log.Info("Configuration reloaded successfully")
 	return nil
@@ -201,5 +205,7 @@ func (m *Manager) ReloadConfig() error {
 
 // GetConfig returns the current configuration.
 func (m *Manager) GetConfig() *Config {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.Config
 }

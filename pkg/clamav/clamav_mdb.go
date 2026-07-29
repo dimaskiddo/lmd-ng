@@ -25,16 +25,44 @@ type MDBStore struct {
 
 // NewMDBStore creates a new empty MDBStore.
 func NewMDBStore() *MDBStore {
+	return NewMDBStoreWithCapacity(0)
+}
+
+// NewMDBStoreWithCapacity creates an MDBStore with pre-allocated map capacity.
+// No signature count limit is imposed — maps grow unboundedly via normal assignment.
+func NewMDBStoreWithCapacity(totalSigs int) *MDBStore {
+	cap := totalSigs / 3
+	if cap < 1024 {
+		cap = 1024
+	}
 	return &MDBStore{
-		MD5Hashes:    make(map[string]MDBEntry),
-		SHA1Hashes:   make(map[string]MDBEntry),
-		SHA256Hashes: make(map[string]MDBEntry),
+		MD5Hashes:    make(map[string]MDBEntry, cap),
+		SHA1Hashes:   make(map[string]MDBEntry, cap),
+		SHA256Hashes: make(map[string]MDBEntry, cap),
 	}
 }
 
 // TotalCount returns the total number of MDB signatures loaded across all types.
 func (s *MDBStore) TotalCount() int {
 	return len(s.MD5Hashes) + len(s.SHA1Hashes) + len(s.SHA256Hashes)
+}
+
+// PrepareCapacity pre-allocates maps with the given capacity if they are empty.
+// No signature count limit is imposed — maps grow unboundedly via normal assignment.
+func (s *MDBStore) PrepareCapacity(totalSigs int) {
+	cap := totalSigs / 3
+	if cap < 1024 {
+		cap = 1024
+	}
+	if len(s.MD5Hashes) == 0 {
+		s.MD5Hashes = make(map[string]MDBEntry, cap)
+	}
+	if len(s.SHA1Hashes) == 0 {
+		s.SHA1Hashes = make(map[string]MDBEntry, cap)
+	}
+	if len(s.SHA256Hashes) == 0 {
+		s.SHA256Hashes = make(map[string]MDBEntry, cap)
+	}
 }
 
 // LoadMDB parses PE section hash signatures from a reader (content of .mdb or .msb file).

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 type Config struct {
@@ -176,8 +177,17 @@ func SetDefaultConfig(config *Config) {
 	config.Quarantine.EnableEncryption = true
 	config.Quarantine.EncryptionKey = "CHANGE-THIS-TO-YOUR-SECRET-KEY"
 
-	config.Monitor.Paths = []string{"/home", "/var/www"}
-	config.Monitor.ExcludeDirs = []string{"/proc", "/sys", "/dev"}
+	switch runtime.GOOS {
+	case "linux":
+		config.Monitor.Paths = []string{"/home", "/var/www"}
+		config.Monitor.ExcludeDirs = []string{"/proc", "/sys", "/dev"}
+	case "darwin":
+		config.Monitor.Paths = []string{"/Users"}
+		config.Monitor.ExcludeDirs = []string{"/dev", "/System", "/Library"}
+	default:
+		config.Monitor.Paths = []string{}
+		config.Monitor.ExcludeDirs = []string{}
+	}
 
 	config.Scanner.SignaturePath = config.App.SignaturesDir
 
@@ -206,8 +216,8 @@ func SetDefaultConfig(config *Config) {
 	config.Updater.AutoUpdateSignatures = true
 	config.Updater.RemoteURITimeout = "30s"
 
-	config.Updater.SignaturePackURL = "https://www.rfxn.com/downloads/maldet-sigpack.tgz"
-	config.Updater.SignatureVersionURL = "https://www.rfxn.com/downloads/maldet-sigpack.ver"
+	config.Updater.SignaturePackURL = "https://cdn.rfxn.com/downloads/maldet-sigpack.tgz"
+	config.Updater.SignatureVersionURL = "https://cdn.rfxn.com/downloads/maldet.sigs.ver"
 
 	config.Updater.ClamAVUpdateEnabled = false
 	config.Updater.ClamAVMirrorURL = "https://database.clamav.net"

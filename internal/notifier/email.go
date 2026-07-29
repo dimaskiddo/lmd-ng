@@ -14,44 +14,9 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/log"
 )
 
-// EmailNotifier handles sending email notifications for malware detections.
-type EmailNotifier struct {
-	cfg *config.EmailNotificationConfig
-}
-
-// NewEmailNotifier creates a new EmailNotifier with the given configuration.
-func NewEmailNotifier(cfg *config.EmailNotificationConfig) *EmailNotifier {
-	return &EmailNotifier{
-		cfg: cfg,
-	}
-}
-
-// SendQuarantineNotification sends an HTML email notification indicating a file was quarantined.
-func (n *EmailNotifier) SendQuarantineNotification(filePath, signatureName string) error {
-	if !n.cfg.Enabled || len(n.cfg.Recipients) == 0 {
-		return nil
-	}
-
-	hostname, _ := os.Hostname()
-	if hostname == "" {
-		hostname = "Unknown"
-	}
-
-	// Prepare data for the template
-	data := struct {
-		Hostname      string
-		Timestamp     string
-		FilePath      string
-		SignatureName string
-	}{
-		Hostname:      hostname,
-		Timestamp:     time.Now().Format(time.RFC1123),
-		FilePath:      filePath,
-		SignatureName: signatureName,
-	}
-
-	// HTML template design
-	const htmlTemplate = `
+// emailHTMLTemplate is the HTML template for quarantine notification emails.
+// Parsed once at EmailNotifier construction time.
+const emailHTMLTemplate = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -83,13 +48,52 @@ func (n *EmailNotifier) SendQuarantineNotification(filePath, signatureName strin
 </html>
 `
 
-	tmpl, err := template.New("email").Parse(htmlTemplate)
+// EmailNotifier handles sending email notifications for malware detections.
+type EmailNotifier struct {
+	cfg  *config.EmailNotificationConfig
+	tmpl *template.Template
+}
+
+// NewEmailNotifier creates a new EmailNotifier with the given configuration.
+// The HTML template is parsed once at construction time.
+func NewEmailNotifier(cfg *config.EmailNotificationConfig) *EmailNotifier {
+	tmpl, err := template.New("email").Parse(emailHTMLTemplate)
 	if err != nil {
-		return fmt.Errorf("failed to parse email template: %w", err)
+		// Template is a compile-time constant — parse failure is a programming error
+		log.Error("Failed to parse email template (programming error)", "error", err)
+	}
+	return &EmailNotifier{
+		cfg:  cfg,
+		tmpl: tmpl,
+	}
+}
+
+// SendQuarantineNotification sends an HTML email notification indicating a file was quarantined.
+func (n *EmailNotifier) SendQuarantineNotification(filePath, signatureName string) error {
+	if !n.cfg.Enabled || len(n.cfg.Recipients) == 0 {
+		return nil
+	}
+
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "Unknown"
+	}
+
+	// Prepare data for the template
+	data := struct {
+		Hostname      string
+		Timestamp     string
+		FilePath      string
+		SignatureName string
+	}{
+		Hostname:      hostname,
+		Timestamp:     time.Now().Format(time.RFC1123),
+		FilePath:      filePath,
+		SignatureName: signatureName,
 	}
 
 	var body bytes.Buffer
-	if err := tmpl.Execute(&body, data); err != nil {
+	if err := n.tmpl.Execute(&body, data); err != nil {
 		return fmt.Errorf("failed to execute email template: %w", err)
 	}
 
@@ -158,7 +162,7 @@ func (n *EmailNotifier) SendQuarantineNotification(filePath, signatureName strin
 
 		c.Quit()
 	} else {
-		err = smtp.SendMail(addr, auth, n.cfg.Sender, n.cfg.Recipients, msg)
+		err := smtp.SendMail(addr, auth, n.cfg.Sender, n.cfg.Recipients, msg)
 		if err != nil {
 			return fmt.Errorf("failed to send email via standard SMTP: %w", err)
 		}

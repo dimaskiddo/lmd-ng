@@ -173,7 +173,11 @@ func (dm *darwinMonitor) Start(ctx context.Context) error {
 	for {
 		select {
 		case ev := <-merged:
-			go dm.handleEvent(ctx, ev.Path, ev.Flags)
+			dm.parent.sem <- struct{}{}
+			go func() {
+				defer func() { <-dm.parent.sem }()
+				dm.handleEvent(ctx, ev.Path, ev.Flags)
+			}()
 
 		case <-ctx.Done():
 			log.Info("File system monitor stopped", "backend", "fsevents")
