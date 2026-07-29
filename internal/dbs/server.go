@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
@@ -42,11 +43,16 @@ func NewServer(cfg *config.Config, engines []scanner.SignatureEngine) (*Server, 
 		return nil, fmt.Errorf("failed to create listener: %w", err)
 	}
 
-	return &Server{
+	s := &Server{
 		cfg:      cfg,
 		listener: ln,
 		engines:  engines,
-	}, nil
+	}
+
+	// Clean up temp files from prior unclean shutdowns
+	s.cleanOrphanTempFiles()
+
+	return s, nil
 }
 
 // Serve starts accepting client connections. It blocks until the context is
@@ -58,6 +64,9 @@ func (s *Server) Serve(ctx context.Context) error {
 		<-ctx.Done()
 		s.listener.Close()
 	}()
+
+	// Periodic cleanup of stale temp files
+	go s.startTempCleanup(ctx)
 
 	for {
 		conn, err := s.listener.Accept()
@@ -136,6 +145,94 @@ func (s *Server) getEngines() []scanner.SignatureEngine {
 	copy(engines, s.engines)
 
 	return engines
+}
+
+// cleanOrphanTempFiles removes any leftover lmd-scan-* temp files from prior
+// crashes or unclean shutdowns. Called once at server startup before accepting
+// connections — no active scan references exist at this point.
+func (s *Server) cleanOrphanTempFiles() {
+	tmpDir := filepath.Join(s.cfg.App.BasePath, "tmp")
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warn("Failed to read temp directory for cleanup", "path", tmpDir, "error", err)
+		}
+		return
+	}
+
+	var cleaned int
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(entry.Name(), "lmd-scan-") {
+			path := filepath.Join(tmpDir, entry.Name())
+			if removeErr := os.Remove(path); removeErr != nil {
+				log.Debug("Failed to remove orphaned temp file", "path", path, "error", removeErr)
+			} else {
+				cleaned++
+			}
+		}
+	}
+
+	if cleaned > 0 {
+		log.Info("Cleaned up orphaned temp files", "count", cleaned, "directory", tmpDir)
+	}
+}
+
+// startTempCleanup periodically removes stale lmd-scan-* temp files.
+// Runs until ctx is cancelled. Catches files leaked by panics or edge cases
+// where the deferred cleanup in handleScanRequest did not execute.
+func (s *Server) startTempCleanup(ctx context.Context) {
+	const cleanupInterval = 1 * time.Minute
+	const staleThreshold = 5 * time.Minute
+
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.removeStaleTempFiles(staleThreshold)
+		}
+	}
+}
+
+// removeStaleTempFiles deletes lmd-scan-* files older than the given threshold.
+func (s *Server) removeStaleTempFiles(threshold time.Duration) {
+	tmpDir := filepath.Join(s.cfg.App.BasePath, "tmp")
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		return
+	}
+
+	now := time.Now()
+	var cleaned int
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "lmd-scan-") {
+			continue
+		}
+
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			continue
+		}
+
+		if now.Sub(info.ModTime()) > threshold {
+			path := filepath.Join(tmpDir, entry.Name())
+			if removeErr := os.Remove(path); removeErr != nil {
+				log.Debug("Failed to remove stale temp file", "path", path, "error", removeErr)
+			} else {
+				cleaned++
+			}
+		}
+	}
+
+	if cleaned > 0 {
+		log.Info("Cleaned up stale temp files", "count", cleaned, "directory", tmpDir)
+	}
 }
 
 // handleConnection processes a single client connection. It reads the initial
@@ -231,6 +328,15 @@ func (s *Server) handleScanRequest(ctx context.Context, conn net.Conn, requestPa
 	}
 
 	for {
+		// Check for shutdown before blocking on network read
+		select {
+		case <-ctx.Done():
+			log.Debug("Scan interrupted by shutdown", "file", req.FilePath)
+			s.sendError(conn, "server shutting down")
+			return
+		default:
+		}
+
 		msgType, chunk, readErr := protocol.ReadFrame(conn)
 		if readErr != nil {
 			log.Error("Failed to read chunk", "error", readErr)
