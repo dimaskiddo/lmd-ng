@@ -209,7 +209,7 @@ func (s *NDBStore) LoadNDB(r io.Reader, sourceName string) error {
 		return fmt.Errorf("error reading NDB signatures from %s: %w", sourceName, err)
 	}
 
-	slog.Info("Loaded ClamAV NDB signatures",
+	slog.Info("Loaded NDB signatures",
 		"source", sourceName,
 		"loaded", loaded,
 		"skipped", skipped)

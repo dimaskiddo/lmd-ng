@@ -148,7 +148,7 @@ func (s *HDBStore) LoadHDB(r io.Reader, sourceName string) error {
 		return fmt.Errorf("error reading HDB signatures from %s: %w", sourceName, err)
 	}
 
-	slog.Info("Loaded ClamAV HDB/HSB signatures",
+	slog.Info("Loaded HDB/HSB signatures",
 		"source", sourceName,
 		"loaded", loaded,
 		"skipped", skipped,

@@ -119,7 +119,7 @@ func LoadFromDirectory(clamAVDir string) (*ClamAVSignatureDB, error) {
 		}
 
 		flatPath := filepath.Join(clamAVDir, entry.Name())
-		slog.Info("Loading ClamAV "+strings.ToUpper(sigType)+" signatures file", "path", flatPath, "type", sigType)
+		slog.Info("Loading "+strings.ToUpper(sigType)+" signatures file", "path", flatPath, "type", sigType)
 
 		file, err := os.Open(flatPath)
 		if err != nil {
@@ -134,7 +134,7 @@ func LoadFromDirectory(clamAVDir string) (*ClamAVSignatureDB, error) {
 		file.Close()
 	}
 
-	slog.Info("ClamAV signature database loaded",
+	slog.Info("Signature database loaded",
 		"hdb_total", db.HDB.TotalCount(),
 		"mdb_total", db.MDB.TotalCount(),
 		"ndb_total", db.NDB.TotalCount(),

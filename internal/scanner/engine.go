@@ -68,6 +68,15 @@ func NewLMDSignatureScanner(cfg *config.Config) (*LMDSignatureScanner, error) {
 		log.Debug("Failed to load RFXN ClamAV signatures", "error", err)
 	}
 
+	if clamavS != nil && clamavS.TotalSignatures() > 0 {
+		log.Info("RFXN signatures loaded",
+			"hdb_total", clamavS.HDB.TotalCount(),
+			"ndb_total", clamavS.NDB.TotalCount(),
+			"total_signatures", clamavS.TotalSignatures())
+	} else {
+		log.Debug("No RFXN signatures found", "path", rfxnPath)
+	}
+
 	return &LMDSignatureScanner{
 		cfg:           cfg,
 		md5Scanner:    md5S,
