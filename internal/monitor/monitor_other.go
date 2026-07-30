@@ -125,6 +125,15 @@ func (om *otherMonitor) handleEvent(ctx context.Context, name string, op fsnotif
 			if err := om.addRecursive(name); err != nil {
 				log.Error("Failed to add new directory to monitor", "path", name, "error", err)
 			}
+			return
+		}
+		if op&fsnotify.Remove != 0 {
+			if err := om.watcher.Remove(name); err != nil {
+				log.Debug("Failed to remove directory watch", "path", name, "error", err)
+			} else {
+				log.Info("Directory removed, removing from monitor", "path", name, "backend", "fsnotify")
+			}
+			return
 		}
 		return
 	}

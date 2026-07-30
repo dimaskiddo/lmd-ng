@@ -107,8 +107,11 @@ func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fse
 	// Log only events that survive all exclusion filters
 	log.Debug("Monitor event received", "path", path, "flags", fmt.Sprintf("0x%x", flags))
 
-	// Skip directory events — we only scan files
+	// Handle directory events before the general dir-skip
 	if statErr == nil && info.IsDir() {
+		if flags&fsevents.ItemRemoved != 0 {
+			log.Info("Directory removed, removing from monitor", "path", path, "backend", "fsevents")
+		}
 		return
 	}
 
