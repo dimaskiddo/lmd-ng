@@ -6,7 +6,7 @@ Rewrite Linux Malware Detect (LMD/Maldet) from Bash into a modern Golang applica
 
 ## Workflow Rules
 
-1. Read `TASKS.md` before every session to orient to current state.
+1. Read `TASKS.md` and project docs before every session to orient to current state.
 2. Never rework items marked `[x]` in `TASKS.md` unless explicitly instructed.
 3. Update `TASKS.md` immediately after completing a task.
 4. Never attempt to write the entire codebase in a single response.
@@ -38,7 +38,7 @@ Rewrite Linux Malware Detect (LMD/Maldet) from Bash into a modern Golang applica
 
 | Format | Source |
 |---|---|
-| MD5/SHA256 hashes | LMD native |
+| MD5/SHA1/SHA256 hashes | LMD native |
 | HEX (hex-string) signatures | LMD native |
 | RFXN (NDB hex-pattern) | LMD native via `pkg/clamav` NDB parser |
 | ClamAV `.cvd`/`.cld`/`.ndb`/`.mdb`/`.hdb` | ClamAV |
@@ -138,7 +138,7 @@ lmd-ng/
 ├── cmd/lmd-ng/           # Entry: cobra CLI (main, daemon, scan, update, upgrade, status, service, quarantine, version)
 ├── internal/
 │   ├── config/           # Viper YAML config, path resolution, hot-reload (SIGHUP)
-│   ├── dbs/              # Database Signature Server (TCP/TLS, Unix socket)
+│   ├── dbs/              # Database Signature Server (TCP/TLS, Unix socket, connection pool, client)
 │   ├── rtp/              # Real-Time Protector (FS monitor client)
 │   ├── scanner/          # Signature engines, walker, scan coordinator
 │   ├── monitor/          # Platform-specific FS events (darwin/other)
@@ -157,11 +157,13 @@ lmd-ng/
 │   ├── ARCHITECTURE.md   # Module map, component internals, data flows
 │   └── WORKFLOWS.md      # Pipeline flow diagrams, operational sequences
 ├── hack/zcc.sh           # Zig C compiler wrapper
-├── dist/                 # Build output
+├── dist/                 # Build output (generated, not in repo)
 ├── config.yaml.example   # Full annotated config template
 ├── Makefile              # Build targets (build, release, docker-build, clean)
 ├── .goreleaser.yml       # Cross-platform release config
-└── Dockerfile            # Multi-stage Go+Zig build
+├── Dockerfile            # Multi-stage Go+Zig build
+├── AGENTS.md             # Agent instructions (also via symlinks CLAUDE.md, GEMINI.md)
+└── vendor/               # Go vendored dependencies
 ```
 
 ---

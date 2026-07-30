@@ -71,9 +71,9 @@ flowchart TD
 **LMD signatures:**
 1. Check internet (`util.HasInternetAccess()` — TCP dial `google.com:443`, 2s timeout)
 2. Fetch remote version from `signature_version_url`
-3. Compare with local `<sigs_dir>/maldet-sigpack.ver`
+3. Compare with local `<sigs_dir>/maldet.sigs.ver`
 4. If different: download `.tgz` to temp file → extract entries:
-   - `maldet.sigpack.ver` → `<sigs_dir>/`
+   - `maldet.sigs.ver` → `<sigs_dir>/`
    - `md5v2.dat`, `sha256v2.dat`, `hex.dat` → `<sigs_dir>/dat/`
    - `rfxn.*` → `<sigs_dir>/rfxn/`
 5. All writes atomic (`.tmp` + rename)
@@ -97,7 +97,9 @@ flowchart TD
 - Same event filtering as macOS
 
 **Filtering (both platforms):**
-- Skip: quarantine artifacts (`.enc.tmp`, `.dec.tmp`, `.quarantined`, `.metadata.json`), directories, excluded paths
+- Skip: quarantine artifacts, `lmd-scan-*` temp files, `#*` orphan temp files in system temp dirs, `.#*` lock files (Emacs/GnuPG), orphan inodes (Nlink==0), excluded dirs
+- Skip: DBS scan temp files in app base tmp directory
+- Directories: created dirs added to monitor, removed dirs unwatched (Linux/Windows) or logged (macOS)
 - Each event handled in its own goroutine
 
 ### 4. Scan Flow
@@ -163,11 +165,11 @@ scan command → dbsClient.Ping (single check)
 | Binary | `dist/` | `lmd-ng` |
 | LMD signatures | `<sigs_dir>/dat/` | `md5v2.dat`, `sha256v2.dat`, `hex.dat` |
 | RFXN signatures | `<sigs_dir>/rfxn/` | `rfxn.*` |
-| LMD version | `<sigs_dir>/` | `maldet-sigpack.ver` |
+| LMD version | `<sigs_dir>/` | `maldet.sigs.ver` |
 | ClamAV databases | `<clamav_dir>/` | `daily.cvd`, `bytecode.cvd`, `main.cvd` |
 | Quarantined file | `<quarantine_dir>/` | `<basename>.<32-char-hex>.quarantined` |
 | Quarantine metadata | `<quarantine_dir>/` | `<quarantined-path>.metadata.json` |
-| TLS certificates | `<base_path>/certs/` | `server.crt`, `server.key` (auto-generated) |
+| TLS certificates | `<base_path>/certs/` | `ca.crt`, `ca.key`, `server.crt`, `server.key`, `client.crt`, `client.key` (auto-generated) |
 | Log file | `<logs_dir>/` | `lmd-ng.log` |
 | Unix socket | `<base_path>/` | `lmd-ng.sock` |
 
@@ -178,7 +180,8 @@ scan command → dbsClient.Ping (single check)
 | Scenario | Recovery |
 |---|---|
 | DBS unreachable from RTP | `WaitForServer` retries 30×2s, blocks startup until DBS online |
-| Connection dropped mid-scan | Client retry loop: 3 attempts, 1s backoff. Connection only returned to pool on success (`connHealthy` flag) |
+| Connection dropped mid-scan | Client retry loop: 2 attempts, 1s delay after pool drain. Connection errors drain all pooled connections before retry with fresh dial. File-level errors not retried. Pooled connections health-checked before reuse, idle timeout 4 minutes. |
+| Lock file event (`.#` files) | Filtered at monitor layer — no stat, no scan. Zero noise |
 | Permission denied during walk | Log at Warn/Debug, `continue` to next file. Never abort scan |
 | Quarantine encryption fails | Log error, file remains unquarantined. Scan continues |
 | SIGHUP reload fails | Log error, old config remains active. Engines unaffected |

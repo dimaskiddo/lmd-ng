@@ -157,18 +157,18 @@ type SignatureEngine interface {
 
 ### LMDSignatureScanner
 
-Composed of 4 sub-scanners — scan order: **MD5 → SHA256 → RFXN → HEX**, short-circuits on first match.
+Composed of 4 sub-scanners — scan order: **MD5 → SHA256 → RFXN HDB (MD5/SHA1/SHA256 hash lookup) → RFXN NDB (hex body patterns) → HEX**, short-circuits on first match. SHA1 computed alongside MD5+SHA256 in single `io.MultiWriter` pass.
 
 | Sub-scanner | Source | Matching |
 |---|---|---|
 | **MD5** | `signatures/dat/md5*.dat` + `custom.md5` | `map[string]string` hash→name lookup |
 | **SHA256** | `signatures/dat/sha256*.dat` + `custom.sha256` | `map[string]string` hash→name lookup |
-| **RFXN** | `signatures/rfxn/` via `pkg/clamav` | HDB (file size + hash) + NDB (hex body patterns, depth 64KB) |
-| **HEX** | `signatures/dat/hex*.dat` + `custom.hex` | `bytes.Contains` on decoded hex patterns (depth 20KB) |
+| **RFXN** | `signatures/rfxn/` via `pkg/clamav` | HDB (file size + hash) + NDB (hex body patterns, depth 256KB) |
+| **HEX** | `signatures/dat/hex*.dat` + `custom.hex` | `bytes.Contains` on decoded hex patterns (depth 256KB) |
 
 **Guards:**
 - `HashAllowlistPaths`: files under these prefixes skip hash detection (protects `/usr/bin/*`)
-- `magic.go`: ELF/Mach-O/PE detection — Windows-targeted sigs (prefixed `Win.`, `Trojan.Win`) skipped on non-PE files
+- `magic.go`: ELF/Mach-O/PE detection via `isNativeExecutable` + `isUnixTargetedSig`. On ELF/Mach-O files, only signatures with Unix prefixes (`Unix.`, `Linux.`, `Osx.`, `MacOS.`, `ELF.`, `Mach-O.`) are applied; cross-platform and Windows-specific signatures are skipped.
 
 ### ClamAVSignatureEngine
 
@@ -182,9 +182,11 @@ Filter pipeline applied per file:
 2. Skip non-regular files
 3. Min/max file size check
 4. Owner filters (Unix: UID/GID via `syscall.Stat_t`; Windows: no-op)
-5. Exclude regex check
-6. Include regex check (if set)
-7. Scan-ignore file patterns: glob match against `filepath.Base(path)` using `scan_ignore_file_patterns` config. Extension shorthand (`.log` → `*.log`) auto-normalized. Default list covers archives, documents, audio, video, images, databases, VMs, logs, swap/cache, Exchange files.
+5. Scan-ignore file patterns: glob match against `filepath.Base(path)` using `scan_ignore_file_patterns` config. Extension shorthand (`.log` → `*.log`) auto-normalized. Default list covers archives, documents, audio, video, images, databases, VMs, logs, swap/cache, Exchange files.
+6. Skip orphan inodes and system temp artifacts (Nlink==0 or `#*` in `/tmp`, `/var/tmp`)
+7. Skip editor/tool lock files — `.#*` Emacs autosave and GnuPG agent lock files (silent)
+8. Exclude regex check (if set)
+9. Include regex check (if set)
 
 Platform-specific: `walker_unix.go` (`applyOwnerFilters` — UID/GID), `walker_windows.go` (no-op).
 
@@ -242,7 +244,7 @@ Minimum 4 characters. Scans `*.quarantined` files, extracts hex ID after last `.
 | `monitor` | Watch paths, exclude dirs (auto-appended: sigs, clamav, quarantine, logs) |
 | `scanner` | Signature path, clamav toggle, file size/depth filters, CPU limits, owner/regex filters |
 | `scheduler` | Update interval (cron), scan interval (cron) |
-| `updater` | Auto-update, LMD URLs, ClamAV mirror/databases |
+| `updater` | Auto-update, LMD URLs, ClamAV mirror/databases, binary auto-upgrade, release API |
 | `notification` | Email (SMTP) + Telegram (Bot API) |
 
 ### Search Order

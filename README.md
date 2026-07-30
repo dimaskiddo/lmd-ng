@@ -143,6 +143,7 @@ LMD-NG is managed via a CLI:
 *   **`lmd-ng update`**: Update signatures and trigger a hot-reload in the running DBS.
 *   **`lmd-ng upgrade [--force]`**: Self-upgrade binary from GitHub releases. Without `--force`, exits early if already up-to-date.
 *   **`lmd-ng status`**: Display DBS reachability, signature counts, CVD versions, quarantine, RTP config.
+*   **`lmd-ng version`**: Display binary version and commit hash.
 
 ### 📥 Quarantine Management
 *   **`lmd-ng quarantine list`**: List all quarantined files.
