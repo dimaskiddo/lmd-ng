@@ -96,6 +96,11 @@ func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fse
 		return
 	}
 
+	// Exclude editor/tool lock files (Emacs, GnuPG) — path-based, stat-free
+	if util.IsLockFilePath(path) {
+		return
+	}
+
 	// Stat early — needed for directory check AND orphan inode check
 	info, statErr := os.Lstat(path)
 

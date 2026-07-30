@@ -109,6 +109,11 @@ func (om *otherMonitor) handleEvent(ctx context.Context, name string, op fsnotif
 		return
 	}
 
+	// Exclude editor/tool lock files (Emacs, GnuPG) — path-based, stat-free
+	if util.IsLockFilePath(name) {
+		return
+	}
+
 	// Stat early — needed for directory check AND orphan inode check
 	info, statErr := os.Lstat(name)
 

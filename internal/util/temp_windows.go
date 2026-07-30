@@ -21,6 +21,13 @@ func IsOrphanTempPath(path string) bool {
 	return dir == tmpDir || strings.HasPrefix(dir, tmpDir+string(filepath.Separator))
 }
 
+// IsLockFilePath returns true if the path is a known editor/tool lock file.
+// The .#* convention is Unix-specific (Emacs, GnuPG). On Windows, this
+// pattern is not used, so we return false for all paths.
+func IsLockFilePath(_ string) bool {
+	return false
+}
+
 // IsOrphanTempFile returns true for #* basename files in Windows temp directories.
 // Nlink does not exist on Windows; the basename heuristic is the best available signal.
 func IsOrphanTempFile(path string, _ os.FileInfo) bool {

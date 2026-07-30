@@ -239,8 +239,13 @@ func (w *Walker) ApplyFilters(ctx context.Context, path string, info os.FileInfo
 		}
 	}
 
-	// Skip orphan inodes and system temp artifacts (silent — these are noise)
+	// Skip orphan inodes and system temp artifacts
 	if util.IsOrphanTempFile(path, info) {
+		return nil
+	}
+
+	// Skip editor/tool lock files (Emacs, GnuPG)
+	if util.IsLockFilePath(path) {
 		return nil
 	}
 

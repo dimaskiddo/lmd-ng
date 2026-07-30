@@ -151,7 +151,7 @@ func (r *RTP) scanAndAct(ctx context.Context, filePath string) ([]*scanner.ScanR
 	})
 
 	if filterErr != nil {
-		log.Error("Failed to scan file via DBS", "filepath", filePath, "error", filterErr)
+		log.Warn("Failed to scan file via DBS (skipping)", "filepath", filePath, "error", filterErr)
 		return nil, false
 	}
 

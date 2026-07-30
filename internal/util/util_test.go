@@ -147,3 +147,27 @@ func TestIsOrphanTempPath_HashOutsideTmp(t *testing.T) {
 		t.Error("# file outside /tmp should not match")
 	}
 }
+
+func TestIsLockFilePath_GnuPG(t *testing.T) {
+	if !IsLockFilePath("/home/user/.gnupg/.#lk0x0000560869dc85e0.Unknown-PC.40995") {
+		t.Error("expected .# GnuPG lock file to be detected")
+	}
+}
+
+func TestIsLockFilePath_EmacsInterlock(t *testing.T) {
+	if !IsLockFilePath("/home/user/project/.#README.md") {
+		t.Error("expected .# Emacs interlock file to be detected")
+	}
+}
+
+func TestIsLockFilePath_NormalFile(t *testing.T) {
+	if IsLockFilePath("/home/user/.gnupg/pubring.kbx") {
+		t.Error("expected normal file to NOT match")
+	}
+}
+
+func TestIsLockFilePath_OfficeTempNotMatched(t *testing.T) {
+	if IsLockFilePath("~$document.docx") {
+		t.Error("expected Office ~$ file to NOT match")
+	}
+}

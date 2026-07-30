@@ -3,18 +3,22 @@ package dbs
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
 	"github.com/dimaskiddo/lmd-ng/internal/protocol"
 	"github.com/dimaskiddo/lmd-ng/internal/scanner"
+	"github.com/dimaskiddo/lmd-ng/internal/util"
 )
 
 const (
@@ -26,7 +30,19 @@ const (
 
 	// maxPingRetries is the maximum number of Ping retries before giving up.
 	maxPingRetries = 30
+
+	// connectionIdleTimeout is the maximum time a pooled connection can sit
+	// idle before being discarded on retrieval. Must be shorter than any
+	// server-side or OS-level idle connection timeout.
+	connectionIdleTimeout = 4 * time.Minute
 )
+
+// pooledConn wraps a net.Conn with idle-time tracking for health-checked
+// connection pool reuse.
+type pooledConn struct {
+	conn     net.Conn
+	idleTime time.Time
+}
 
 // scanBufPool reuses byte buffers for streaming file chunks to DBS,
 // reducing GC pressure during concurrent scans.
@@ -37,6 +53,27 @@ var scanBufPool = sync.Pool{
 	},
 }
 
+// isConnFatal reports whether err is a permanent connection failure where
+// the underlying connection is dead (not a transient network issue or
+// file-level error). When true, pooled connections should be drained and
+// a fresh connection dialed.
+func isConnFatal(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for syscall-level connection errors that survive TLS wrapping
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	// Fallback string checks for errors wrapped through TLS/net layers
+	// where syscall error identity may be lost
+	errStr := err.Error()
+	return strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "connection reset by peer")
+}
+
 // Client connects to the DBS server to stream files for signature matching.
 // It opens a new TLS connection per operation (scan, ping, reload) to keep
 // the protocol simple and stateless.
@@ -44,7 +81,7 @@ type Client struct {
 	tlsConfig *tls.Config
 	network   string
 	address   string
-	pool      chan net.Conn
+	pool      chan *pooledConn
 	sem       chan struct{}
 }
 
@@ -78,29 +115,90 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		tlsConfig: tlsConfig,
 		network:   network,
 		address:   address,
-		pool:      make(chan net.Conn, cfg.Server.ConnectionPoolLimit),
+		pool:      make(chan *pooledConn, cfg.Server.ConnectionPoolLimit),
 		sem:       make(chan struct{}, cfg.Scanner.ConcurrencyLimit),
 	}, nil
 }
 
-// getConn retrieves a connection from the pool or dials a new one if the pool is empty.
+// getConn retrieves a healthy connection from the pool or dials a new one.
+// Pooled connections exceeding idle timeout are discarded. Remaining
+// connections are health-checked; dead connections are discarded before
+// falling back to dialing fresh.
 func (c *Client) getConn(ctx context.Context) (net.Conn, error) {
-	select {
-	case conn := <-c.pool:
-		return conn, nil
-	default:
-		return c.dial(ctx)
+	for {
+		select {
+		case pconn := <-c.pool:
+			// Discard connections idle too long
+			if time.Since(pconn.idleTime) > connectionIdleTimeout {
+				pconn.conn.Close()
+				continue
+			}
+			// Verify connection is still alive
+			if err := c.connHealthCheck(pconn.conn); err != nil {
+				log.Debug("Pooled connection is dead, discarding", "error", err)
+				pconn.conn.Close()
+				continue
+			}
+			return pconn.conn, nil
+		default:
+			return c.dial(ctx)
+		}
 	}
 }
 
-// releaseConn returns a healthy connection to the pool. If the pool is full, it closes it.
+// releaseConn returns a healthy connection to the pool with its idle
+// timestamp set to now. If the pool is full, the connection is closed.
 func (c *Client) releaseConn(conn net.Conn) {
+	pconn := &pooledConn{
+		conn:     conn,
+		idleTime: time.Now(),
+	}
 	select {
-	case c.pool <- conn:
-		// Connection successfully returned to the pool
+	case c.pool <- pconn:
+		// Connection returned to pool
 	default:
-		// Pool is full, close the connection
+		// Pool full, discard
 		conn.Close()
+	}
+}
+
+// connHealthCheck verifies a connection is still alive by reading one byte
+// with an already-expired deadline. A live idle connection returns a timeout
+// error. Any other error (EOF, broken pipe, reset) means the connection is dead.
+func (c *Client) connHealthCheck(conn net.Conn) error {
+	// Force an immediate timeout — Read returns instantly
+	conn.SetReadDeadline(time.Now().Add(-time.Second))
+	var buf [1]byte
+	_, err := conn.Read(buf[:])
+	// Always clear the deadline after check
+	conn.SetReadDeadline(time.Time{})
+
+	if err == nil {
+		// Read succeeded — unexpected data on idle TLS connection.
+		// Close to avoid protocol corruption from consumed byte.
+		conn.Close()
+		return fmt.Errorf("unexpected data on idle pooled connection")
+	}
+
+	// Timeout means connection is alive, just no data buffered
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return nil
+	}
+
+	// Any other error: EOF, broken pipe, reset — connection is dead
+	return err
+}
+
+// drainPool closes and discards all idle connections in the pool.
+// Called when a connection error suggests pooled connections may be stale.
+func (c *Client) drainPool() {
+	for {
+		select {
+		case pconn := <-c.pool:
+			pconn.conn.Close()
+		default:
+			return
+		}
 	}
 }
 
@@ -175,8 +273,9 @@ func (c *Client) WaitForServer(ctx context.Context) error {
 }
 
 // ScanFile streams a file to the DBS server for signature matching and returns
-// the scan results. The file is read in chunks and streamed over the TLS
-// connection — neither client nor server buffers the full file in memory.
+// the scan results. Connection-level errors trigger a pool drain and single
+// retry with a fresh connection. File-level errors (permission, not found)
+// are not retried.
 func (c *Client) ScanFile(ctx context.Context, filePath string) ([]*scanner.ScanResult, error) {
 	// Stat the file first (follow symlinks)
 	info, err := os.Stat(filePath)
@@ -198,32 +297,35 @@ func (c *Client) ScanFile(ctx context.Context, filePath string) ([]*scanner.Scan
 		return nil, nil
 	}
 
-	maxRetries := 3
+	const maxRetries = 2
 	var lastErr error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-
-		default:
+		if err := util.CheckContext(ctx); err != nil {
+			return nil, err
 		}
 
-		results, err := c.attemptScanFile(ctx, filePath, info.Size())
-		if err == nil {
+		results, scanErr := c.attemptScanFile(ctx, filePath, info.Size())
+		if scanErr == nil {
 			return results, nil
 		}
 
-		lastErr = err
+		lastErr = scanErr
 
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		// Only retry on connection-level errors. File errors (permission,
+		// read failure, file deleted mid-scan) are not retryable.
+		if !isConnFatal(scanErr) {
+			return nil, fmt.Errorf("failed to scan file %s: %w", filePath, scanErr)
 		}
 
-		log.Debug("Scan attempt failed, retrying", "file", filePath, "attempt", attempt, "max", maxRetries, "error", err)
+		log.Debug("Connection error during scan, draining pool and retrying",
+			"file", filePath, "attempt", attempt, "max", maxRetries, "error", scanErr)
+
+		// Drain all pooled connections — they may be similarly stale
+		c.drainPool()
 
 		if attempt < maxRetries {
-			timer := time.NewTimer(1 * time.Second)
+			timer := time.NewTimer(time.Second)
 			select {
 			case <-timer.C:
 			case <-ctx.Done():
@@ -263,6 +365,19 @@ func (c *Client) attemptScanFile(ctx context.Context, filePath string, fileSize 
 	conn, err := c.getConn(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	// Re-validate file still exists before sending scan request.
+	// File may have been deleted between initial stat and now.
+	reInfo, reErr := os.Stat(filePath)
+	if reErr != nil {
+		if os.IsNotExist(reErr) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to re-stat file %s: %w", filePath, reErr)
+	}
+	if !reInfo.Mode().IsRegular() {
+		return nil, nil
 	}
 
 	// Assume the connection might be broken during use; default to closing it.

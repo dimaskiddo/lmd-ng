@@ -42,6 +42,15 @@ func IsOrphanTempPath(path string) bool {
 	return false
 }
 
+// IsLockFilePath returns true if the path is a known editor/tool lock file
+// that is never malware. Matches basename patterns:
+//   - .#*  (Emacs autosave/interlock, GnuPG agent lock)
+//
+// Pure path-string check -- no stat required. Safe to call when file is deleted.
+func IsLockFilePath(path string) bool {
+	return strings.HasPrefix(filepath.Base(path), ".#")
+}
+
 // IsOrphanTempFile returns true if the file is an orphan inode (Nlink == 0)
 // or a known system-tool temp artifact under /tmp or /var/tmp.
 //
