@@ -1,9 +1,7 @@
 package upgrade
 
 import (
-	"archive/tar"
 	"archive/zip"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -172,59 +170,7 @@ func buildDownloadURL(version, assetName string) string {
 
 // extractBinary finds and extracts the lmd-ng binary from a release archive.
 func extractBinary(archivePath, destDir, goos string) (string, error) {
-	if goos == "windows" {
-		return extractBinaryFromZip(archivePath, destDir)
-	}
-	return extractBinaryFromTarGz(archivePath, destDir)
-}
-
-// extractBinaryFromTarGz extracts the lmd-ng binary from a tar.gz archive.
-func extractBinaryFromTarGz(archivePath, destDir string) (string, error) {
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open archive %s: %w", archivePath, err)
-	}
-	defer f.Close()
-
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return "", fmt.Errorf("failed to create gzip reader for %s: %w", archivePath, err)
-	}
-	defer gz.Close()
-
-	tr := tar.NewReader(gz)
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", fmt.Errorf("failed to read tar entry: %w", err)
-		}
-
-		base := filepath.Base(header.Name)
-		if base != "lmd-ng" && base != "lmd-ng.exe" {
-			continue
-		}
-
-		// Extract binary to destDir
-		binPath := filepath.Join(destDir, base)
-		out, err := os.OpenFile(binPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o755)
-		if err != nil {
-			return "", fmt.Errorf("failed to create binary file %s: %w", binPath, err)
-		}
-
-		if _, err := io.Copy(out, tr); err != nil {
-			out.Close()
-			os.Remove(binPath)
-			return "", fmt.Errorf("failed to extract binary: %w", err)
-		}
-		out.Close()
-
-		return binPath, nil
-	}
-
-	return "", fmt.Errorf("lmd-ng binary not found in archive %s", archivePath)
+	return extractBinaryFromZip(archivePath, destDir)
 }
 
 // extractBinaryFromZip extracts the lmd-ng binary from a zip archive.
