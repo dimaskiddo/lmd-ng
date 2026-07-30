@@ -70,13 +70,13 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 
 	// Strip v prefix for consistent display (GitHub returns "v0.2.0", local has "0.2.0")
 	latestVer := strings.TrimPrefix(latestTag, "v")
+	latestShortCommit := latestCommitish
+	if len(latestShortCommit) > 7 {
+		latestShortCommit = latestShortCommit[:7]
+	}
 	latestDisplay := latestVer
-	if latestCommitish != "" {
-		shortCommitish := latestCommitish
-		if len(shortCommitish) > 7 {
-			shortCommitish = shortCommitish[:7]
-		}
-		latestDisplay = latestVer + " (" + shortCommitish + ")"
+	if latestShortCommit != "" && isHexSHA(latestShortCommit) {
+		latestDisplay = latestVer + " (" + latestShortCommit + ")"
 	}
 	fmt.Printf("  Latest version:  %s\n", latestDisplay)
 	fmt.Println()
@@ -87,7 +87,7 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 			fmt.Println("  Already up-to-date. Use --force to reinstall.")
 			return
 		}
-		fmt.Println("  Same version tag, but newer commit available.")
+		fmt.Printf("  Same version tag, but newer commit available (%s → %s).\n", commit, latestShortCommit)
 	}
 
 	if force && currentVer == latestVer {
@@ -96,7 +96,11 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	fmt.Printf("  Upgrading from %s to %s\n", currentVer, latestTag)
+	commitNote := ""
+	if isHexSHA(latestShortCommit) {
+		commitNote = " (" + latestShortCommit + ")"
+	}
+	fmt.Printf("  Upgrading from %s (%s) to %s%s\n", currentVer, commit, latestVer, commitNote)
 	fmt.Println()
 
 	// --- Download release ---

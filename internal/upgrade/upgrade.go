@@ -15,6 +15,11 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/log"
 )
 
+const (
+	githubRepoOwner = "dimaskiddo"
+	githubRepoName  = "lmd-ng"
+)
+
 // Upgrader handles downloading and preparing the latest LMD-NG release binary.
 type Upgrader struct {
 	cfg        *config.Config
@@ -32,6 +37,11 @@ type releaseResponse struct {
 type asset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+// commitResponse is the minimal GitHub Commits API response.
+type commitResponse struct {
+	SHA string `json:"sha"`
 }
 
 // NewUpgrader creates a new Upgrader with the given configuration.
@@ -71,7 +81,51 @@ func (u *Upgrader) LatestVersion(ctx context.Context) (string, string, error) {
 		return "", "", fmt.Errorf("release API returned empty tag_name")
 	}
 
-	return rel.TagName, rel.TargetCommitish, nil
+	// Resolve tag to actual commit SHA — target_commitish is the branch name
+	// (e.g. "master"), not the commit that built the release.
+	commitSHA, resolveErr := u.resolveTagCommit(ctx, rel.TagName)
+	if resolveErr != nil {
+		log.Debug("Failed to resolve tag commit SHA, falling back to target_commitish",
+			"tag", rel.TagName, "error", resolveErr)
+		commitSHA = rel.TargetCommitish
+	}
+
+	return rel.TagName, commitSHA, nil
+}
+
+// resolveTagCommit resolves a Git tag to its underlying commit SHA via the
+// GitHub Commits API. Accepts any tree-ish ref (tag, branch, commit SHA).
+func (u *Upgrader) resolveTagCommit(ctx context.Context, tag string) (string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/commits/%s",
+		githubRepoOwner, githubRepoName, tag)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create commit API request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	resp, err := u.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to query commit API at %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("commit API returned status %d", resp.StatusCode)
+	}
+
+	var cr commitResponse
+	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
+		return "", fmt.Errorf("failed to decode commit API response: %w", err)
+	}
+
+	if cr.SHA == "" {
+		return "", fmt.Errorf("commit API returned empty SHA")
+	}
+
+	return cr.SHA, nil
 }
 
 // DownloadRelease downloads the release archive for the specified version and
