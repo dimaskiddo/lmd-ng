@@ -49,7 +49,12 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 	fmt.Println()
 
 	// --- Current version ---
-	fmt.Printf("  Current version: %s\n", currentVer)
+	// Show commit only when both look like real SHAs (dev builds show version only)
+	commitSuffix := ""
+	if commit != "" && commit != "none" && isHexSHA(commit) {
+		commitSuffix = fmt.Sprintf(" (%s)", commit)
+	}
+	fmt.Printf("  Current version: %s%s\n", currentVer, commitSuffix)
 	fmt.Println()
 
 	// --- Query latest version ---
@@ -57,24 +62,38 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 
 	u := upgrade.NewUpgrader(cfg)
 
-	latestTag, err := u.LatestVersion(ctx)
+	latestTag, latestCommitish, err := u.LatestVersion(ctx)
 	if err != nil {
 		log.Error("Failed to check for latest version", "error", err)
 		os.Exit(1)
 	}
 
+	// Strip v prefix for consistent display (GitHub returns "v0.2.0", local has "0.2.0")
 	latestVer := strings.TrimPrefix(latestTag, "v")
-	fmt.Printf("  Latest version:  %s\n", latestTag)
+	latestDisplay := latestVer
+	if latestCommitish != "" {
+		shortCommitish := latestCommitish
+		if len(shortCommitish) > 7 {
+			shortCommitish = shortCommitish[:7]
+		}
+		latestDisplay = latestVer + " (" + shortCommitish + ")"
+	}
+	fmt.Printf("  Latest version:  %s\n", latestDisplay)
 	fmt.Println()
 
-	// --- Version comparison ---
+	// --- Version + commit comparison ---
 	if currentVer == latestVer && !force {
-		fmt.Println("  Already up-to-date. Use --force to reinstall.")
-		return
+		if sameCommit(commit, latestCommitish) {
+			fmt.Println("  Already up-to-date. Use --force to reinstall.")
+			return
+		}
+		fmt.Println("  Same version tag, but newer commit available.")
 	}
 
 	if force && currentVer == latestVer {
-		fmt.Println("  Force upgrade enabled. Reinstalling current version.")
+		if sameCommit(commit, latestCommitish) {
+			fmt.Println("  Force upgrade enabled. Reinstalling current version.")
+		}
 	}
 
 	fmt.Printf("  Upgrading from %s to %s\n", currentVer, latestTag)
@@ -187,4 +206,31 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 	backupPath := exePath + ".old"
 	fmt.Printf("  Upgrade complete: %s\n", exePath)
 	fmt.Printf("  Old binary saved: %s\n", backupPath)
+}
+
+// sameCommit returns true if the embedded commit matches the release's target_commitish.
+// Safe default: if either is missing or target_commitish isn't a hex SHA, returns false
+// (triggering an upgrade — better to re-download than miss an update).
+func sameCommit(embedded, target string) bool {
+	if embedded == "" || embedded == "none" || target == "" {
+		return false
+	}
+	if !isHexSHA(target) {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(target), strings.ToLower(embedded))
+}
+
+// isHexSHA returns true if s contains only hexadecimal characters [0-9a-fA-F]
+// and is at least 7 characters long (minimum short SHA length).
+func isHexSHA(s string) bool {
+	if len(s) < 7 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }

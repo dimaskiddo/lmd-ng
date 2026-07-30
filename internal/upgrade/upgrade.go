@@ -25,8 +25,9 @@ type Upgrader struct {
 
 // releaseResponse is the GitHub API response for /releases/latest.
 type releaseResponse struct {
-	TagName string  `json:"tag_name"`
-	Assets  []asset `json:"assets"`
+	TagName         string  `json:"tag_name"`
+	TargetCommitish string  `json:"target_commitish"`
+	Assets          []asset `json:"assets"`
 }
 
 // asset represents a single release asset (downloadable file).
@@ -44,35 +45,35 @@ func NewUpgrader(cfg *config.Config) *Upgrader {
 }
 
 // LatestVersion queries the GitHub Releases API and returns the latest tag_name
-// (e.g. "v0.2.0") or an error if the request fails.
-func (u *Upgrader) LatestVersion(ctx context.Context) (string, error) {
+// and target_commitish (e.g. "v0.2.0", "abc1234def...", nil) or an error.
+func (u *Upgrader) LatestVersion(ctx context.Context) (string, string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", u.cfg.Updater.ReleaseAPIURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create release API request: %w", err)
+		return "", "", fmt.Errorf("failed to create release API request: %w", err)
 	}
 
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
 	resp, err := u.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to query release API at %s: %w", u.cfg.Updater.ReleaseAPIURL, err)
+		return "", "", fmt.Errorf("failed to query release API at %s: %w", u.cfg.Updater.ReleaseAPIURL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("release API returned status %d", resp.StatusCode)
+		return "", "", fmt.Errorf("release API returned status %d", resp.StatusCode)
 	}
 
 	var rel releaseResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
-		return "", fmt.Errorf("failed to decode release API response: %w", err)
+		return "", "", fmt.Errorf("failed to decode release API response: %w", err)
 	}
 
 	if rel.TagName == "" {
-		return "", fmt.Errorf("release API returned empty tag_name")
+		return "", "", fmt.Errorf("release API returned empty tag_name")
 	}
 
-	return rel.TagName, nil
+	return rel.TagName, rel.TargetCommitish, nil
 }
 
 // DownloadRelease downloads the release archive for the specified version and
