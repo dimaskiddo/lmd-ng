@@ -208,7 +208,7 @@ Filter pipeline applied per file:
 2. Skip non-regular files
 3. Min/max file size check
 4. Owner filters (Unix: UID/GID via `syscall.Stat_t`; Windows: no-op)
-5. Scan-ignore file patterns: glob match against `filepath.Base(path)` using `scan_ignore_file_patterns` config. Extension shorthand (`.log` → `*.log`) auto-normalized. Default list covers archives, documents, audio, video, images, databases, VMs, logs, swap/cache, Exchange files.
+5. Scan-ignore file patterns: glob match against `filepath.Base(path)` using `scan_ignore_file_patterns` config. Extension shorthand (`.log` → `*.log`) auto-normalized. Default list covers archives, VM/disk images, logs, cache/temp, editor/system artifacts, LMD-NG internal artifacts, and office temp lock files.
 6. Skip orphan inodes and system temp artifacts (Nlink==0 or `#*` in `/tmp`, `/var/tmp`)
 7. Skip editor/tool lock files — `.#*` Emacs autosave and GnuPG agent lock files (silent)
 8. Exclude regex check (if set)
@@ -226,7 +226,7 @@ Platform-specific: `walker_unix.go` (`applyOwnerFilters` — UID/GID), `walker_w
 flowchart LR
     A["Capture metadata<br/>(os.Lstat)"] --> B["Generate ID<br/>(16 random bytes)"]
     B --> C{"encryption<br/>enabled?"}
-    C -- Yes --> D["AES-256-GCM<br/>encrypt 4KB chunks"]
+    C -- Yes --> D["AES-256-GCM<br/>encrypt (single-pass)"]
     C -- No --> E["Move to<br/>quarantine dir"]
     D --> E
     E --> F["chmod 0o000<br/>(lock)"]
@@ -246,6 +246,7 @@ flowchart LR
 | `ModTime` | Original modification time |
 | `FileSize` | Original file size |
 | `EncryptionKey` | Encrypted AES file key (master key = SHA-256 of config password) |
+| `Nonce` | AES-GCM nonce used for file encryption (random 12 bytes per file) |
 
 ### Restore Flow
 
@@ -369,9 +370,8 @@ flowchart LR
 
 ### Archive Extraction
 
-- **Linux/macOS:** `tar.gz` — finds `lmd-ng` binary in archive, extracts to `<basePath>/tmp/`
-- **Windows:** `zip` — finds `lmd-ng.exe` binary, extracts to `<basePath>/tmp/`
-- Asset filename follows goreleaser conventions: `lmd-ng_<ver>_<os>_<arch>` (`.tar.gz` or `.zip`)
+- **All platforms:** `zip` — finds `lmd-ng` (or `lmd-ng.exe`) binary in archive, extracts to `<basePath>/tmp/`
+- Asset filename follows goreleaser conventions: `lmd-ng_<ver>_<os>_<arch>.zip`
 
 ### Version Comparison
 
@@ -400,7 +400,7 @@ flowchart LR
 1. **No `os/exec` in core** — file traversal via `filepath.WalkDir`, monitoring via `fsnotify`/`fsevents`, signatures via Go `crypto` + `pkg/clamav`
 2. **DBS/RTP split** — signature engine runs as server, monitor as client. Enables multi-host deployments, shared signature database
 3. **Streaming I/O** — files read via `os.Open` + `io.Reader` in 32KB chunks. Never `os.ReadFile` on target files
-4. **AES-256-GCM quarantine** — streaming 4KB chunk encryption, random per-file key, master key derived from config password via SHA-256
+4. **AES-256-GCM quarantine** — single-pass encryption (one `gcm.Seal` per file), random per-file key, master key derived from config password via SHA-256
 5. **Hot-swap engines** — DBS holds engines behind `sync.RWMutex`. In-flight scans use snapshot; reload swaps atomically
 6. **Two-pass short-circuit scan** — Pass 1 runs all engines' hash-based `Scan()` (deterministic, zero FP); first match returns immediately. If no hash match, Pass 2 runs all engines' `ScanHeuristics()` (heuristic, FP-prone); first match returns immediately. Hash matches always take priority over heuristic matches.
 7. **PE section hash matching (MDB)** — Both engines parse PE headers on detected PE files, hash each section (MD5+SHA1+SHA256), and check against MDB signature databases. Covers packed/mutated malware where full-file hashes differ but section content signatures match.

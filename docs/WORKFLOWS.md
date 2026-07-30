@@ -189,7 +189,7 @@ flowchart TD
 2. **Quarantine check:** If `quarantine.enabled` and match found:
 3. **Capture metadata:** `os.Lstat` (no symlink follow) — FileMode, UID/GID, ModTime, FileSize
 4. **Generate ID:** 16 random bytes → 32-char hex
-5. **Encrypt:** Random 32-byte AES-256-GCM key → encrypt in 4KB chunks → encrypt file key with master key (SHA-256 of config password)
+5. **Encrypt:** Random 32-byte AES-256-GCM key → single-pass encrypt → encrypt file key with master key (SHA-256 of config password)
 6. **Atomic move:** `os.Rename` to quarantine dir (fallback copy+delete for cross-device)
 7. **Lock:** `chmod 0o000`
 8. **Sidecar:** Write `.metadata.json` (permission `0o600`)
@@ -217,7 +217,7 @@ flowchart TD
 
 1. **Version check:** `Upgrader.LatestVersion(ctx)` → GitHub Releases API → returns `(tag, commitish)`
 2. **Compare:** If same version + same commit → exit (up-to-date). `--force` skips this.
-3. **Download:** `Upgrader.DownloadRelease(ctx, tag, goos, goarch)` → download zip/tgz to temp file → extract lmd-ng binary
+3. **Download:** `Upgrader.DownloadRelease(ctx, tag, goos, goarch)` → download zip to temp file → extract lmd-ng binary
 4. **Detect services:** Check if `lmd-ng-dbs` / `lmd-ng-rtp` are installed
 5. **Stop services:** Stop RTP first (if installed), then DBS (if installed)
 6. **Wait:** 1 second for services to fully exit
@@ -259,7 +259,7 @@ flowchart TD
 | SIGHUP reload fails | Log error, old config remains active. Engines unaffected |
 | Signature download fails | Log error, existing signatures remain. Update skipped |
 | Internet offline (notifications) | `MultiNotifier` checks `HasInternetAccess()` before dispatch. Silently drops if offline |
-| Symlink in walk path | Resolved via `filepath.EvalSymlinks` on root, `os.Stat` on each file |
+| Symlink in walk path | Resolved via `filepath.EvalSymlinks` on root; symlinks rejected at scan entry points (DBS client, ScanCoordinator) via `os.Lstat` |
 | Cross-device quarantine move | Falls back to copy+delete when `os.Rename` returns `EXDEV` |
 | Upgrade download fails | Log error, exit 1. No binary modified |
 | Upgrade service stop fails | Log warning, continue. Binary still replaced |
