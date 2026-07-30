@@ -120,6 +120,27 @@ func (sc *ScannerConfig) IsHeuristicEnabled(name string) bool {
 	return false
 }
 
+// Validate checks scanner configuration values are within acceptable ranges.
+// Returns an error describing the first invalid value found, or nil if all valid.
+func (sc *ScannerConfig) Validate() error {
+	if sc.MaxDepth < 0 {
+		return fmt.Errorf("max_depth must be >= 0, got %d", sc.MaxDepth)
+	}
+	if sc.HexDepth < 0 {
+		return fmt.Errorf("hex_depth must be >= 0, got %d", sc.HexDepth)
+	}
+	if sc.ClamAVHexDepth < 0 {
+		return fmt.Errorf("clamav_hex_depth must be >= 0, got %d", sc.ClamAVHexDepth)
+	}
+	if sc.ConcurrencyLimit < 0 {
+		return fmt.Errorf("concurrency_limit must be >= 0, got %d", sc.ConcurrencyLimit)
+	}
+	if sc.MinFilesize < 0 {
+		return fmt.Errorf("min_filesize must be >= 0, got %d", sc.MinFilesize)
+	}
+	return nil
+}
+
 // SchedulerConfig holds scheduling settings for updates and scans.
 type SchedulerConfig struct {
 	UpdateInterval string `yaml:"update_interval" mapstructure:"update_interval"`

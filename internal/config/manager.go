@@ -118,6 +118,11 @@ func NewConfigManager(configFilePath string) (*Manager, error) {
 	// relative paths against the potentially updated BasePath.
 	m.Config.ResolvePaths()
 
+	// Validate scanner configuration values are within acceptable ranges
+	if err := m.Config.Scanner.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid scanner config: %w", err)
+	}
+
 	// Add app data directories to exclude list to prevent recursive monitoring loops
 	// and to ensure the on-demand scanner doesn't scan its own data.
 	appDirs := []string{
@@ -168,6 +173,11 @@ func (m *Manager) ReloadConfig() error {
 	}
 
 	newConfig.ResolvePaths()
+
+	// Validate scanner configuration values are within acceptable ranges
+	if err := newConfig.Scanner.Validate(); err != nil {
+		return fmt.Errorf("invalid scanner config in reloaded config: %w", err)
+	}
 
 	appDirs := []string{
 		newConfig.App.SignaturesDir,

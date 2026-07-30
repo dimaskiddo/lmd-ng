@@ -2,11 +2,13 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -30,6 +32,7 @@ import (
 // heuristic pattern matches across all engines.
 func ScanDataWithEngines(ctx context.Context, engines []SignatureEngine, r io.ReadSeeker, filePath string) ([]*ScanResult, error) {
 	// --- Pass 1: Hash-based scanning (deterministic, zero FP) ---
+	var scanErrors []error
 	for _, engine := range engines {
 		select {
 		case <-ctx.Done():
@@ -45,6 +48,7 @@ func ScanDataWithEngines(ctx context.Context, engines []SignatureEngine, r io.Re
 		res, err := engine.Scan(ctx, r, filePath)
 		if err != nil {
 			log.Error("Signature engine scan failed", "engine", engine.Name(), "filepath", filePath, "error", err)
+			scanErrors = append(scanErrors, fmt.Errorf("%s: %w", engine.Name(), err))
 			continue
 		}
 
@@ -75,12 +79,18 @@ func ScanDataWithEngines(ctx context.Context, engines []SignatureEngine, r io.Re
 		res, err := hs.ScanHeuristics(ctx, r, filePath)
 		if err != nil {
 			log.Error("Heuristic scan failed", "engine", engine.Name(), "filepath", filePath, "error", err)
+			scanErrors = append(scanErrors, fmt.Errorf("%s ScanHeuristics: %w", engine.Name(), err))
 			continue
 		}
 
 		if len(res) > 0 {
 			return res, nil
 		}
+	}
+
+	// If all engines failed, return aggregated error instead of silent nil
+	if len(scanErrors) > 0 {
+		return nil, fmt.Errorf("all engines failed: %w", errors.Join(scanErrors...))
 	}
 
 	return nil, nil
@@ -160,6 +170,11 @@ func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string, qMgr 
 			go func() {
 				defer scanWg.Done()
 				defer func() { <-sem }() // Release the semaphore slot when done
+				defer func() {
+					if r := recover(); r != nil {
+						log.Error("Scan goroutine panicked", "file", filePath, "panic", r, "stack", debug.Stack())
+					}
+				}()
 
 				fileResults, err := sc.ScanFile(childCtx, filePath)
 				if err != nil {
@@ -230,8 +245,9 @@ func (sc *ScanCoordinator) StartScan(ctx context.Context, rootPath string, qMgr 
 // engines via ScanDataWithEngines. Logs detections as MALWARE DETECTED (LOCAL).
 func (sc *ScanCoordinator) ScanFile(ctx context.Context, filePath string) ([]*ScanResult, error) {
 	// Stat the file first to skip directories and non-regular files.
-	// Use os.Stat (not Lstat) to follow symlinks and resolve Docker volume mounts.
-	info, err := os.Stat(filePath)
+	// Use os.Lstat (not Stat) to avoid following symlinks — prevents TOCTOU
+	// attacks where a symlink is substituted between stat and open.
+	info, err := os.Lstat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Debug("File no longer exists, skipping scan", "filepath", filePath)
@@ -244,6 +260,13 @@ func (sc *ScanCoordinator) ScanFile(ctx context.Context, filePath string) ([]*Sc
 		}
 
 		return nil, fmt.Errorf("failed to stat file %s for scanning: %w", filePath, err)
+	}
+
+	// Reject symlinks — prevents TOCTOU attacks where a safe file is replaced
+	// with a symlink between stat and open.
+	if info.Mode()&os.ModeSymlink != 0 {
+		log.Debug("Skipping symlink", "filepath", filePath)
+		return nil, nil
 	}
 
 	if !info.Mode().IsRegular() {

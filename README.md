@@ -57,6 +57,34 @@ graph TD
 
 ---
 
+## ⚠️ Upgrading
+
+> **Quarantine encryption format changed (after v0.2.0) — breaking for files quarantined with encryption enabled.**
+>
+> Quarantined files created with `enable_encryption: true` on versions after v0.2.0 use a
+> broken encryption format (nonce reuse across 4KB chunks). Files larger than 4KB were
+> never correctly encrypted and **cannot be restored**. Files smaller than 4KB may appear
+> to decrypt but their authentication tags are invalid.
+>
+> **Before upgrading**, check your quarantined files. If you are not sure which files
+> were affected, you can try restoring them first:
+>
+> ```sh
+> lmd-ng quarantine list
+> lmd-ng quarantine restore <id>
+> ```
+>
+> If restoration fails or you want to clean up, remove the affected files:
+>
+> ```sh
+> lmd-ng quarantine remove --force <id>
+> ```
+>
+> **Unencrypted quarantine files are unaffected** — they were never encrypted and can be
+> restored normally after upgrading.
+
+---
+
 ## 🚀 Getting Started
 
 ### 📋 Prerequisites

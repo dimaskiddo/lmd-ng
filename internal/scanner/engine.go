@@ -124,9 +124,25 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 	default:
 	}
 
-	_, err := io.Copy(multiWriter, r)
-	if err != nil {
-		return nil, fmt.Errorf("failed to calculate hash: %w", err)
+	buf := make([]byte, 32*1024)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		n, readErr := r.Read(buf)
+		if n > 0 {
+			if _, wErr := multiWriter.Write(buf[:n]); wErr != nil {
+				return nil, fmt.Errorf("hash write failed: %w", wErr)
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to calculate hash: %w", readErr)
+		}
 	}
 
 	md5Hash := hex.EncodeToString(md5Hasher.Sum(nil))
@@ -459,8 +475,25 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 	sha256Hasher := sha256.New()
 	multiHashWriter := io.MultiWriter(md5Hasher, sha1Hasher, sha256Hasher)
 
-	if _, err := io.Copy(multiHashWriter, r); err != nil {
-		return nil, fmt.Errorf("failed to compute file hashes: %w", err)
+	buf := make([]byte, 32*1024)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		n, readErr := r.Read(buf)
+		if n > 0 {
+			if _, wErr := multiHashWriter.Write(buf[:n]); wErr != nil {
+				return nil, fmt.Errorf("hash write failed: %w", wErr)
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to compute file hashes: %w", readErr)
+		}
 	}
 
 	md5Hash := hex.EncodeToString(md5Hasher.Sum(nil))

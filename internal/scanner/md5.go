@@ -43,7 +43,11 @@ func newMD5Scanner(cfg *config.Config) (*md5Scanner, error) {
 	// Load custom user MD5 signatures if they exist
 	customSigPath := filepath.Join(cfg.App.SignaturesDir, "custom.md5")
 	if err := s.loadSignatures(customSigPath); err != nil {
-		log.Debug("No custom MD5 signatures found or failed to load", "error", err)
+		if os.IsNotExist(err) {
+			log.Debug("No custom MD5 signatures found", "error", err)
+		} else {
+			log.Warn("Failed to load custom MD5 signatures", "error", err)
+		}
 	}
 
 	return s, nil
@@ -105,6 +109,10 @@ func (s *md5Scanner) loadSignatures(filePath string) error {
 		s.signatures[hash] = name
 	}
 
+	if err := scanner.Err(); err != nil {
+		log.Warn("Scanner error while loading MD5 signatures", "file", filePath, "error", err)
+	}
+
 	log.Info("Loaded MD5 signatures", "count", len(s.signatures)-sigsBefore, "file", filePath)
 	return nil
 }
@@ -121,7 +129,7 @@ func (s *md5Scanner) Count() int {
 // returned. This prevents a bad signature database from falsely flagging
 // legitimate system files (e.g. /usr/bin/sudo, /usr/lib/*.so).
 func (s *md5Scanner) Check(md5Hash, filePath string) string {
-	name := s.signatures[strings.ToLower(md5Hash)]
+	name := s.signatures[md5Hash]
 	if name == "" {
 		return ""
 	}

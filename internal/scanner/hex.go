@@ -55,7 +55,11 @@ func newHexScanner(cfg *config.Config) (*hexScanner, error) {
 	// Load custom user hex signatures if they exist
 	customSigPath := filepath.Join(cfg.App.SignaturesDir, "custom.hex")
 	if err := s.loadSignatures(customSigPath); err != nil {
-		log.Debug("No custom HEX signatures found or failed to load", "error", err)
+		if os.IsNotExist(err) {
+			log.Debug("No custom HEX signatures found", "error", err)
+		} else {
+			log.Warn("Failed to load custom HEX signatures", "error", err)
+		}
 	}
 
 	return s, nil
@@ -137,6 +141,10 @@ func (s *hexScanner) loadSignatures(filePath string) error {
 
 		s.signatures = append(s.signatures, *sig)
 		loaded++
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Warn("Scanner error while loading HEX signatures", "file", filePath, "error", err)
 	}
 
 	log.Info("Loaded HEX signatures", "count", loaded, "file", filePath)

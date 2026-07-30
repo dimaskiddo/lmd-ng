@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -32,10 +31,10 @@ func buildEngines(cfg *config.Config) ([]scanner.SignatureEngine, error) {
 	if cfg.Scanner.ClamAVEnabled {
 		clamEngine, clamErr := scanner.NewClamAVSignatureEngine(cfg)
 		if clamErr != nil {
-			return nil, fmt.Errorf("failed to create ClamAV signature engine: %w", clamErr)
+			log.Warn("Failed to create ClamAV engine, continuing without it", "error", clamErr)
+		} else {
+			engines = append(engines, clamEngine)
 		}
-
-		engines = append(engines, clamEngine)
 	}
 
 	return engines, nil
@@ -92,9 +91,6 @@ Subcommands:
 					log.Error("DBS server error", "error", err)
 				}
 			}()
-
-			// Give DBS a moment to start listening
-			time.Sleep(500 * time.Millisecond)
 
 			// --- Start RTP client ---
 			var notifiers []notifier.Notifier

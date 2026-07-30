@@ -22,8 +22,7 @@ import (
 )
 
 const (
-	filePerm  = 0o000 // Read/write/execute denied for all
-	chunkSize = 4096  // 4KB chunk size for stream encryption/decryption
+	filePerm = 0o000 // Read/write/execute denied for all
 )
 
 // IsQuarantineArtifact returns true if the path belongs to a quarantine temp file
@@ -525,29 +524,22 @@ func (qm *QuarantineManager) encryptFile(filePath string, key []byte) (string, [
 	}
 	defer ciphertextFile.Close()
 
-	buffer := make([]byte, chunkSize)
-	for {
-		n, err := plaintextFile.Read(buffer)
-		if n > 0 {
-			sealed := gcm.Seal(nil, nonce, buffer[:n], nil)
-			if _, writeErr := ciphertextFile.Write(sealed); writeErr != nil {
-				if removeErr := os.Remove(encryptedTempFilePath); removeErr != nil {
-					log.Debug("Failed to remove encrypted temp file during write error cleanup", "file", encryptedTempFilePath, "error", removeErr)
-				}
-				return "", nil, fmt.Errorf("failed to write encrypted chunk: %w", writeErr)
-			}
+	// Read entire plaintext — bounded by MaxFilesize config (default 20MB).
+	// Single-pass GCM: one Seal call per file, no nonce reuse across chunks.
+	plaintext, err := io.ReadAll(plaintextFile)
+	if err != nil {
+		if removeErr := os.Remove(encryptedTempFilePath); removeErr != nil {
+			log.Debug("Failed to remove encrypted temp file during read error cleanup", "file", encryptedTempFilePath, "error", removeErr)
 		}
+		return "", nil, fmt.Errorf("failed to read plaintext file: %w", err)
+	}
 
-		if err == io.EOF {
-			break
+	sealed := gcm.Seal(nil, nonce, plaintext, nil)
+	if _, writeErr := ciphertextFile.Write(sealed); writeErr != nil {
+		if removeErr := os.Remove(encryptedTempFilePath); removeErr != nil {
+			log.Debug("Failed to remove encrypted temp file during write error cleanup", "file", encryptedTempFilePath, "error", removeErr)
 		}
-
-		if err != nil {
-			if removeErr := os.Remove(encryptedTempFilePath); removeErr != nil {
-				log.Debug("Failed to remove encrypted temp file during read error cleanup", "file", encryptedTempFilePath, "error", removeErr)
-			}
-			return "", nil, fmt.Errorf("failed to read plaintext file chunk: %w", err)
-		}
+		return "", nil, fmt.Errorf("failed to write encrypted data: %w", writeErr)
 	}
 
 	if err := os.Remove(filePath); err != nil {
@@ -587,35 +579,28 @@ func (qm *QuarantineManager) decryptFile(filePath string, key []byte, nonce []by
 	}
 	defer plaintextFile.Close()
 
-	buffer := make([]byte, chunkSize+gcm.Overhead())
-	for {
-		n, err := ciphertextFile.Read(buffer)
-		if n > 0 {
-			opened, openErr := gcm.Open(nil, nonce, buffer[:n], nil)
-			if openErr != nil {
-				if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {
-					log.Debug("Failed to remove decrypted temp file during decrypt error cleanup", "file", decryptedTempFilePath, "error", removeErr)
-				}
-				return "", fmt.Errorf("failed to decrypt chunk: %w", openErr)
-			}
-			if _, writeErr := plaintextFile.Write(opened); writeErr != nil {
-				if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {
-					log.Debug("Failed to remove decrypted temp file during write error cleanup", "file", decryptedTempFilePath, "error", removeErr)
-				}
-				return "", fmt.Errorf("failed to write decrypted chunk: %w", writeErr)
-			}
+	// Read entire ciphertext — bounded by quarantine file size. Single-pass GCM.
+	ciphertext, err := io.ReadAll(ciphertextFile)
+	if err != nil {
+		if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {
+			log.Debug("Failed to remove decrypted temp file during read error cleanup", "file", decryptedTempFilePath, "error", removeErr)
 		}
+		return "", fmt.Errorf("failed to read ciphertext file: %w", err)
+	}
 
-		if err == io.EOF {
-			break
+	opened, openErr := gcm.Open(nil, nonce, ciphertext, nil)
+	if openErr != nil {
+		if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {
+			log.Debug("Failed to remove decrypted temp file during decrypt error cleanup", "file", decryptedTempFilePath, "error", removeErr)
 		}
+		return "", fmt.Errorf("failed to decrypt file: %w", openErr)
+	}
 
-		if err != nil {
-			if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {
-				log.Debug("Failed to remove decrypted temp file during read error cleanup", "file", decryptedTempFilePath, "error", removeErr)
-			}
-			return "", fmt.Errorf("failed to read ciphertext chunk: %w", err)
+	if _, writeErr := plaintextFile.Write(opened); writeErr != nil {
+		if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {
+			log.Debug("Failed to remove decrypted temp file during write error cleanup", "file", decryptedTempFilePath, "error", removeErr)
 		}
+		return "", fmt.Errorf("failed to write decrypted data: %w", writeErr)
 	}
 
 	if err := os.Remove(filePath); err != nil {

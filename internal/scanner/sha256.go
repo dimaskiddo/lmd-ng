@@ -43,7 +43,11 @@ func newSHA256Scanner(cfg *config.Config) (*sha256Scanner, error) {
 	// Load custom user SHA256 signatures if they exist
 	customSigPath := filepath.Join(cfg.App.SignaturesDir, "custom.sha256")
 	if err := s.loadSignatures(customSigPath); err != nil {
-		log.Debug("No custom SHA256 signatures found or failed to load", "error", err)
+		if os.IsNotExist(err) {
+			log.Debug("No custom SHA256 signatures found", "error", err)
+		} else {
+			log.Warn("Failed to load custom SHA256 signatures", "error", err)
+		}
 	}
 
 	return s, nil
@@ -105,6 +109,10 @@ func (s *sha256Scanner) loadSignatures(filePath string) error {
 		s.signatures[hash] = name
 	}
 
+	if err := scanner.Err(); err != nil {
+		log.Warn("Scanner error while loading SHA256 signatures", "file", filePath, "error", err)
+	}
+
 	log.Info("Loaded SHA256 signatures", "count", len(s.signatures)-sigsBefore, "file", filePath)
 	return nil
 }
@@ -121,7 +129,7 @@ func (s *sha256Scanner) Count() int {
 // returned. This prevents a bad signature database from falsely flagging
 // legitimate system files (e.g. /usr/bin/sudo, /usr/lib/*.so).
 func (s *sha256Scanner) Check(sha256Hash, filePath string) string {
-	name := s.signatures[strings.ToLower(sha256Hash)]
+	name := s.signatures[sha256Hash]
 	if name == "" {
 		return ""
 	}

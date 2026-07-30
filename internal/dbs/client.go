@@ -277,8 +277,9 @@ func (c *Client) WaitForServer(ctx context.Context) error {
 // retry with a fresh connection. File-level errors (permission, not found)
 // are not retried.
 func (c *Client) ScanFile(ctx context.Context, filePath string) ([]*scanner.ScanResult, error) {
-	// Stat the file first (follow symlinks)
-	info, err := os.Stat(filePath)
+	// Stat the file first (use Lstat to avoid following symlinks — prevents
+	// TOCTOU attacks where a symlink is substituted between stat and open).
+	info, err := os.Lstat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Debug("File no longer exists, skipping scan", "filepath", filePath)
@@ -291,6 +292,12 @@ func (c *Client) ScanFile(ctx context.Context, filePath string) ([]*scanner.Scan
 		}
 
 		return nil, fmt.Errorf("failed to stat file %s: %w", filePath, err)
+	}
+
+	// Reject symlinks — prevents TOCTOU attacks
+	if info.Mode()&os.ModeSymlink != 0 {
+		log.Debug("Skipping symlink", "filepath", filePath)
+		return nil, nil
 	}
 
 	if !info.Mode().IsRegular() {
@@ -369,12 +376,16 @@ func (c *Client) attemptScanFile(ctx context.Context, filePath string, fileSize 
 
 	// Re-validate file still exists before sending scan request.
 	// File may have been deleted between initial stat and now.
-	reInfo, reErr := os.Stat(filePath)
+	reInfo, reErr := os.Lstat(filePath)
 	if reErr != nil {
 		if os.IsNotExist(reErr) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to re-stat file %s: %w", filePath, reErr)
+	}
+	// Reject symlinks — prevents TOCTOU attacks
+	if reInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, nil
 	}
 	if !reInfo.Mode().IsRegular() {
 		return nil, nil
@@ -418,6 +429,7 @@ func (c *Client) attemptScanFile(ctx context.Context, filePath string, fileSize 
 
 		n, readErr := file.Read(buf)
 		if n > 0 {
+			conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
 			if writeErr := protocol.WriteFrame(conn, protocol.MsgScanChunk, buf[:n]); writeErr != nil {
 				return nil, fmt.Errorf("failed to send chunk for %s: %w", filePath, writeErr)
 			}

@@ -78,6 +78,11 @@ func (s *Server) Serve(ctx context.Context) error {
 				return nil
 
 			default:
+				if err == net.ErrClosed {
+					// Listener closed (e.g. by Shutdown or ctx cancellation goroutine)
+					s.wg.Wait()
+					return nil
+				}
 				log.Error("Failed to accept connection", "error", err)
 				continue
 			}
@@ -240,6 +245,9 @@ func (s *Server) removeStaleTempFiles(threshold time.Duration) {
 func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
+	// Set read deadline to prevent goroutine leak from stalled clients
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+
 	// Read the first frame to determine request type
 	msgType, payload, err := protocol.ReadFrame(conn)
 	if err != nil {
@@ -336,6 +344,9 @@ func (s *Server) handleScanRequest(ctx context.Context, conn net.Conn, requestPa
 			return
 		default:
 		}
+
+		// Set per-read deadline to prevent goroutine leak from stalled clients
+		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
 		msgType, chunk, readErr := protocol.ReadFrame(conn)
 		if readErr != nil {
@@ -449,16 +460,16 @@ func (s *Server) handleStatusRequest(conn net.Conn) {
 
 		switch e := engine.(type) {
 		case *scanner.LMDSignatureScanner:
-			data.SignatureCounts["MD5 Hashes"] = e.MD5Count()
-			data.SignatureCounts["SHA256 Hashes"] = e.SHA256Count()
-			data.SignatureCounts["HEX Patterns"] = e.HEXCount()
-			data.SignatureCounts["RFXN Signatures"] = e.RFXNCount()
+			data.SignatureCounts["MD5 Hashes"] += e.MD5Count()
+			data.SignatureCounts["SHA256 Hashes"] += e.SHA256Count()
+			data.SignatureCounts["HEX Patterns"] += e.HEXCount()
+			data.SignatureCounts["RFXN Signatures"] += e.RFXNCount()
 			totalSigs += e.MD5Count() + e.SHA256Count() + e.HEXCount() + e.RFXNCount()
 
 		case *scanner.ClamAVSignatureEngine:
-			data.SignatureCounts["HDB Signatures"] = e.HDBCount()
-			data.SignatureCounts["NDB Signatures"] = e.NDBCount()
-			data.SignatureCounts["MDB Signatures"] = e.MDBCount()
+			data.SignatureCounts["HDB Signatures"] += e.HDBCount()
+			data.SignatureCounts["NDB Signatures"] += e.NDBCount()
+			data.SignatureCounts["MDB Signatures"] += e.MDBCount()
 			totalSigs += e.TotalSignatures()
 
 			if cvdVersions := e.CVDVersions(); len(cvdVersions) > 0 {
