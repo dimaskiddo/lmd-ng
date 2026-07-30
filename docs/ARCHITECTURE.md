@@ -155,24 +155,50 @@ type SignatureEngine interface {
 }
 ```
 
+### HeuristicScanner Interface (optional)
+
+```go
+// HeuristicScanner is an optional interface for heuristic pattern matching.
+// Engines implementing it are called in a separate second pass after all engines
+// complete their deterministic hash-based Scan pass.
+type HeuristicScanner interface {
+    ScanHeuristics(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error)
+}
+```
+
 ### LMDSignatureScanner
 
-Composed of 4 sub-scanners — scan order: **MD5 → SHA256 → RFXN HDB (MD5/SHA1/SHA256 hash lookup) → RFXN NDB (hex body patterns) → HEX**, short-circuits on first match. SHA1 computed alongside MD5+SHA256 in single `io.MultiWriter` pass.
+Dispatched in two passes by `ScanDataWithEngines`:
 
-| Sub-scanner | Source | Matching |
-|---|---|---|
-| **MD5** | `signatures/dat/md5*.dat` + `custom.md5` | `map[string]string` hash→name lookup |
-| **SHA256** | `signatures/dat/sha256*.dat` + `custom.sha256` | `map[string]string` hash→name lookup |
-| **RFXN** | `signatures/rfxn/` via `pkg/clamav` | HDB (file size + hash) + NDB (hex body patterns, depth 256KB) |
-| **HEX** | `signatures/dat/hex*.dat` + `custom.hex` | `bytes.Contains` on decoded hex patterns (depth 256KB) |
+**Pass 1 — `Scan()` (deterministic, hash-only):**
+MD5 → SHA256 → RFXN HDB (MD5/SHA1/SHA256 file-hash lookup) → RFXN MDB (PE section hash). Short-circuits on first match. SHA1 computed alongside MD5+SHA256 in single `io.MultiWriter` pass.
+
+**Pass 2 — `ScanHeuristics()` (pattern-based, gated by `enabled_heuristics`):**
+HEX → RFXN NDB. Only runs if no hash match was found in Pass 1. Short-circuits on first match.
+
+| Sub-scanner | Source | Matching | Pass |
+|---|---|---|---|
+| **MD5** | `signatures/dat/md5*.dat` + `custom.md5` | `map[string]string` hash→name lookup | 1 (Scan) |
+| **SHA256** | `signatures/dat/sha256*.dat` + `custom.sha256` | `map[string]string` hash→name lookup | 1 (Scan) |
+| **RFXN HDB** | `signatures/rfxn/` via `pkg/clamav` | File-size-gated MD5/SHA1/SHA256 hash lookup | 1 (Scan) |
+| **RFXN MDB** | `signatures/rfxn/` via `pkg/clamav` | PE section hash lookup (PE files only) | 1 (Scan) |
+| **HEX** | `signatures/dat/hex*.dat` + `custom.hex` | `bytes.Contains` + wildcard matching (depth 256KB) | 2 (ScanHeuristics) |
+| **RFXN NDB** | `signatures/rfxn/` via `pkg/clamav` | Body hex patterns (depth 256KB) | 2 (ScanHeuristics) |
 
 **Guards:**
 - `HashAllowlistPaths`: files under these prefixes skip hash detection (protects `/usr/bin/*`)
 - `magic.go`: ELF/Mach-O/PE detection via `isNativeExecutable` + `isUnixTargetedSig`. On ELF/Mach-O files, only signatures with Unix prefixes (`Unix.`, `Linux.`, `Osx.`, `MacOS.`, `ELF.`, `Mach-O.`) are applied; cross-platform and Windows-specific signatures are skipped.
+- HEX and NDB heuristic sub-scanners gated by `enabled_heuristics` config. Default: `["hex"]`. Add `"ndb"` to enable NDB body-pattern matching (accepts FP risk).
 
 ### ClamAVSignatureEngine
 
-Three-pass scan: **Hash phase** (single-pass MD5+SHA1+SHA256 via `io.MultiWriter`, HDB lookup) → **PE section phase** (parse PE headers, hash each section, MDB lookup — PE files only) → **Body phase** (read to 64KB, NDB pattern matching).
+Dispatched in two passes by `ScanDataWithEngines`:
+
+**Pass 1 — `Scan()` (deterministic, hash-only):**
+Single-pass hash computation (MD5+SHA1+SHA256 via `io.MultiWriter`) → HDB lookup → PE section detection (MDB lookup for PE files only). Short-circuits on first match.
+
+**Pass 2 — `ScanHeuristics()` (pattern-based, gated by `enabled_heuristics: ["ndb"]`):**
+Reads first `clamav_hex_depth` bytes (default 64KB), runs NDB body-pattern matching. Only runs if no hash match was found in Pass 1 and `"ndb"` is in `enabled_heuristics`.
 
 ### Walker (`internal/scanner/walker.go`)
 
@@ -376,9 +402,10 @@ flowchart LR
 3. **Streaming I/O** — files read via `os.Open` + `io.Reader` in 32KB chunks. Never `os.ReadFile` on target files
 4. **AES-256-GCM quarantine** — streaming 4KB chunk encryption, random per-file key, master key derived from config password via SHA-256
 5. **Hot-swap engines** — DBS holds engines behind `sync.RWMutex`. In-flight scans use snapshot; reload swaps atomically
-6. **Short-circuit scan** — engines tried sequentially; first positive match returns immediately
-7. **Permission resiliency** — walker never crashes on `os.ErrPermission`. Log at Warn/Debug, continue to next file
-8. **Stdlib first** — minimal third-party deps. Zig CC for CGO cross-compilation, not raw gcc/clang
-9. **Dual output logging** — `slog` structured logging with lumberjack rotation, simultaneous stdout + file via `io.MultiWriter`
-10. **Config paths relative to binary** — all paths resolved from binary's real directory, not CWD. Avoids ambiguity in daemon/service mode
-11. **Platform-aware self-upgrade** — Linux/macOS: atomic inode rename. Windows: batch trampoline (copies new binary, exits old process, batch swaps + restarts services). Service-aware: only restarts installed services.
+6. **Two-pass short-circuit scan** — Pass 1 runs all engines' hash-based `Scan()` (deterministic, zero FP); first match returns immediately. If no hash match, Pass 2 runs all engines' `ScanHeuristics()` (heuristic, FP-prone); first match returns immediately. Hash matches always take priority over heuristic matches.
+7. **PE section hash matching (MDB)** — Both engines parse PE headers on detected PE files, hash each section (MD5+SHA1+SHA256), and check against MDB signature databases. Covers packed/mutated malware where full-file hashes differ but section content signatures match.
+8. **Permission resiliency** — walker never crashes on `os.ErrPermission`. Log at Warn/Debug, continue to next file
+9. **Stdlib first** — minimal third-party deps. Zig CC for CGO cross-compilation, not raw gcc/clang
+10. **Dual output logging** — `slog` structured logging with lumberjack rotation, simultaneous stdout + file via `io.MultiWriter`
+11. **Config paths relative to binary** — all paths resolved from binary's real directory, not CWD. Avoids ambiguity in daemon/service mode
+12. **Platform-aware self-upgrade** — Linux/macOS: atomic inode rename. Windows: batch trampoline (copies new binary, exits old process, batch swaps + restarts services). Service-aware: only restarts installed services.

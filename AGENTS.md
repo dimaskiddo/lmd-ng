@@ -25,7 +25,7 @@ Rewrite Linux Malware Detect (LMD/Maldet) from Bash into a modern Golang applica
 |---|---|
 | **DBS** | Database Signature Server — TCP/TLS daemon holding signature engines in memory, streams scan requests from clients |
 | **RTP** | Real-Time Protector — file system monitor client, streams changed files to DBS for matching, handles quarantine locally |
-| **Scanner** | Core engine: `SignatureEngine` interface, `LMDSignatureScanner` (MD5+SHA256+RFXN+HEX), `ClamAVSignatureEngine`, `Walker`, `ScanCoordinator` |
+| **Scanner** | Core engine: `SignatureEngine` interface + optional `HeuristicScanner`, two-pass orchestrator `ScanDataWithEngines` (Pass 1: hash-only `Scan`; Pass 2: heuristic `ScanHeuristics`). `LMDSignatureScanner` (LMD native MD5/SHA256/HEX + RFXN HDB/MDB/NDB), `ClamAVSignatureEngine` (ClamAV CVD HDB/MDB/NDB), `Walker`, `ScanCoordinator` |
 | **Monitor** | Platform-specific FS events: FSEvents on macOS, fsnotify on Linux/Windows |
 | **Scheduler** | Cron-based update + scan scheduling via `robfig/cron/v3` |
 | **Updater** | Downloads LMD signature packs (.tar.gz) and ClamAV CVD databases; version checking, atomic writes |
@@ -36,12 +36,19 @@ Rewrite Linux Malware Detect (LMD/Maldet) from Bash into a modern Golang applica
 
 ## Signature Types
 
-| Format | Source |
-|---|---|
-| MD5/SHA1/SHA256 hashes | LMD native |
-| HEX (hex-string) signatures | LMD native |
-| RFXN (NDB hex-pattern) | LMD native via `pkg/clamav` NDB parser |
-| ClamAV `.cvd`/`.cld`/`.ndb`/`.mdb`/`.hdb` | ClamAV |
+Scan runs in two passes. Pass 1 (hash-based, deterministic) runs all engines' `Scan()`. Pass 2 (heuristic, FP-prone) runs `ScanHeuristics()` on engines implementing `HeuristicScanner`, gated by `enabled_heuristics` config.
+
+| Signature Type | Engine | Source | Pass | Gated By |
+|---|---|---|---|---|
+| `MD5` | LMDSignatureScanner | LMD native `dat/md5*.dat` | 1 (Scan) | — |
+| `SHA256` | LMDSignatureScanner | LMD native `dat/sha256*.dat` | 1 (Scan) | — |
+| `RFXN-MD5/SHA1/SHA256` | LMDSignatureScanner | RFXN `sigs/rfxn/` via `pkg/clamav` HDB | 1 (Scan) | — |
+| `RFXN-MDB` | LMDSignatureScanner | RFXN `sigs/rfxn/` via `pkg/clamav` MDB | 1 (Scan) | — |
+| `ClamAV-MD5/SHA1/SHA256` | ClamAVSignatureEngine | ClamAV CVD via `pkg/clamav` HDB | 1 (Scan) | `clamav_enabled` |
+| `ClamAV-MDB` | ClamAVSignatureEngine | ClamAV CVD via `pkg/clamav` MDB | 1 (Scan) | `clamav_enabled` |
+| `HEX` | LMDSignatureScanner | LMD native `dat/hex*.dat` | 2 (ScanHeuristics) | `enabled_heuristics: ["hex"]` |
+| `RFXN-NDB` | LMDSignatureScanner | RFXN `sigs/rfxn/` via `pkg/clamav` NDB | 2 (ScanHeuristics) | `enabled_heuristics: ["ndb"]` |
+| `ClamAV-NDB` | ClamAVSignatureEngine | ClamAV CVD via `pkg/clamav` NDB | 2 (ScanHeuristics) | `clamav_enabled` + `enabled_heuristics: ["ndb"]` |
 
 ## CLI
 
@@ -76,11 +83,12 @@ lmd-ng [--config <path>]
 ### Native Implementation (No os/exec in core)
 - File traversal: `filepath.WalkDir`, not `find`.
 - File monitoring: `fsnotify` (Linux/Windows), `fsnotify/fsevents` (macOS FSE via CGO).
-- Signature matching: `crypto` for MD5/SHA256 hashes, `pkg/clamav` for HEX/NDB patterns.
+- Signature matching: `crypto` for MD5/SHA256 hashes; `internal/scanner/hex.go` for LMD native HEX patterns; `pkg/clamav` for RFXN/ClamAV HDB, MDB, and NDB signatures.
 
 ### ClamAV
 - Fully implemented: `ClamAVSignatureEngine`, pure-Go CVD/CLD/HDB/MDB/NDB parsers in `pkg/clamav/`.
 - Toggled via `clamav_enabled: false` in config. Off by default — enable when needed.
+- ClamAV NDB body-pattern matching is additionally gated by `enabled_heuristics: ["ndb"]` — even with `clamav_enabled: true`, NDB requires explicit heuristic enablement.
 
 ### Configuration
 - YAML via `spf13/viper`. Legacy `conf.maldet` vars → `config.yaml`. Search: `--config` flag → binary dir → `/etc/lmd-ng/` → `/usr/local/etc/lmd-ng/` → `/usr/local/lmd-ng/`.
@@ -97,7 +105,7 @@ lmd-ng [--config <path>]
 - `lumberjack` for rotation. Rotation params bound to config.
 
 ### Context & Concurrency
-- `context.Context` as first param for long-running functions.
+- `context.Context` as first param for long-running functions. Scan methods check `ctx.Done()` intra-pass (hash computation, PE section parsing, heuristic scanning).
 - Graceful shutdown via OS signals + context cancellation.
 - `sync.Mutex`/`sync.RWMutex` on all shared state.
 - `errgroup` / `sync.WaitGroup` — no goroutine leaks.

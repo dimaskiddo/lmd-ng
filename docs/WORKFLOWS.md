@@ -71,7 +71,7 @@ flowchart TD
 1. **Config:** `config.NewConfigManager()` — search binary dir → `/etc/lmd-ng/` → `/usr/local/etc/lmd-ng/` → `/usr/local/lmd-ng/`. Resolve all paths relative to binary's directory.
 2. **Logger:** `log.InitLogger()` — dual output (stdout + lumberjack file) when `output: "file"`.
 3. **Ensure dirs:** Create `logs/`, `sigs/`, `quarantine/`, `clamav/` (if enabled).
-4. **Build engines:** `buildEngines(cfg)` — always create `LMDSignatureScanner` (loads MD5 + SHA256 + HEX + RFXN signatures). If `clamav_enabled: true`, also create `ClamAVSignatureEngine`.
+4. **Build engines:** `buildEngines(cfg)` — always create `LMDSignatureScanner` (loads LMD native: MD5 + SHA256 + HEX, plus RFXN: HDB + MDB + NDB via `pkg/clamav`). Hash-based sub-scanners (MD5, SHA256, RFXN HDB, RFXN MDB) are always active. Heuristic sub-scanners (HEX, RFXN NDB) are gated by `enabled_heuristics` config. If `clamav_enabled: true`, also create `ClamAVSignatureEngine` (HDB + MDB always active; NDB gated by `enabled_heuristics`).
 5. **Start DBS:** `dbs.NewServer(cfg, engines)` — set `EngineFactory` for hot-reload. `server.Serve(ctx)` enters accept loop.
 6. **SIGHUP goroutine:** `handleConfigReload()` — re-read YAML, swap config atomically. Triggers `EngineFactory` to rebuild engines.
 
@@ -113,25 +113,75 @@ flowchart TD
 
 ### 4. Scan Flow
 
-**DBS path (normal):**
-```
-RTP callback → walker.ApplyFilters → dbsClient.ScanFile
-→ send MsgScanRequest → stream MsgScanChunk (32KB) → MsgScanEnd
-→ read MsgScanResult → return
+#### DBS Path (normal)
+
+```mermaid
+flowchart TD
+    A[RTP callback] --> B[walker.ApplyFilters]
+    B --> C[dbsClient.ScanFile]
+    C --> D[send MsgScanRequest]
+    D --> E[stream MsgScanChunk 32KB]
+    E --> F[MsgScanEnd]
+    F --> G[read MsgScanResult]
+    G --> H[return results]
 ```
 
-**Local fallback (DBS unavailable):**
-```
-scan command → dbsClient.Ping (single check)
-→ if unreachable → ScanCoordinator.StartScan
-→ walker.Walk → per file: ScanFile → ScanDataWithEngines
-→ results channel → collect + quarantine if matched
+#### Local Fallback (DBS unavailable)
+
+```mermaid
+flowchart TD
+    A[scan command] --> B[dbsClient.Ping]
+    B -->|reachable| C[runDBSScan]
+    B -->|unreachable| D[ScanCoordinator.StartScan]
+    D --> E[walker.Walk]
+    E --> F[per file: ScanFile]
+    F --> G[ScanDataWithEngines]
+    G --> H[results channel]
+    H --> I[collect + quarantine if matched]
 ```
 
-**ScanDataWithEngines** (shared by both paths):
-- Iterates engines sequentially, rewinds reader to byte 0 before each
-- ClamAV engine: hash phase (HDB) → PE section phase (MDB, PE files only) → body phase (NDB)
-- Short-circuits on first positive detection
+#### ScanDataWithEngines (shared by both paths)
+
+Two-pass architecture: Pass 1 runs all engines' hash-based `Scan()` (deterministic, zero FP), then Pass 2 runs `ScanHeuristics()` on engines implementing `HeuristicScanner` (pattern-based, FP-prone, config-gated). Hash matches always take priority.
+
+```mermaid
+flowchart TD
+    Start([ScanDataWithEngines]) --> Pass1
+
+    subgraph Pass1["Pass 1 — Hash (deterministic, zero FP)"]
+        direction LR
+        E1[LMDSignatureScanner.Scan] --> E1R{match?}
+        E1R -->|no| E2[ClamAVSignatureEngine.Scan]
+        E2 --> E2R{match?}
+    end
+
+    E1R -->|yes| Return([return results])
+    E2R -->|yes| Return
+
+    E2R -->|no| Pass2
+
+    subgraph Pass2["Pass 2 — Heuristic (FP-prone, config-gated)"]
+        direction LR
+        H1[LMDSignatureScanner.ScanHeuristics] --> H1R{match?}
+        H1R -->|no| H2[ClamAVSignatureEngine.ScanHeuristics]
+        H2 --> H2R{match?}
+    end
+
+    H1R -->|yes| Return
+    H2R -->|yes| Return
+    H2R -->|no| NoMatch([return nil, nil])
+```
+
+**Pass 1 details:**
+- Each engine's `Scan()` is hash-only: MD5, SHA256, RFXN HDB, RFXN MDB (LMDSignatureScanner); ClamAV HDB, ClamAV MDB (ClamAVSignatureEngine)
+- Short-circuits on first detection across all engines
+
+**Pass 2 details:**
+- Only runs if Pass 1 found no match
+- Each engine's `ScanHeuristics()` is individually gated by `enabled_heuristics` config
+- LMDSignatureScanner: HEX patterns + RFXN NDB (if `"ndb"` enabled)
+- ClamAVSignatureEngine: ClamAV NDB (if `"ndb"` enabled)
+- Short-circuits on first detection across all engines
 
 ### 5. Detection & Quarantine
 
