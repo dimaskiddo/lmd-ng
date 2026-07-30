@@ -297,7 +297,66 @@ Privilege check (Unix: UID==0; Windows: `Token.IsElevated()`) → resolve execut
 
 ---
 
-## 8. Cross-Platform Concerns
+## 8. Upgrade (`internal/upgrade/`)
+
+Platform-aware self-upgrade via GitHub Releases API.
+
+### Flow
+
+```mermaid
+flowchart LR
+    A["Query GitHub<br>Releases API"] --> B{"Version<br>changed?"}
+    B -- No --> C["Exit<br>(up-to-date)"]
+    B -->|"Yes / --force"| D["Download<br>zip/tgz archive"]
+    D --> E["Extract<br>lmd-ng binary"]
+    E --> F{"OS?"}
+    F -- Unix --> G["Atomic inode<br>swap (rename)"]
+    F -- Windows --> H["Batch trampoline<br>(copy + restart)"]
+    G --> I["Restart<br>services"]
+    H --> I
+```
+
+### Components
+
+| Component | Location | Role |
+|---|---|---|
+| `Upgrader` | `internal/upgrade/upgrade.go` | GitHub API client, download, archive extraction |
+| `ReplaceBinary` (Unix) | `internal/upgrade/upgrade_unix.go` | Atomic `os.Rename` with cross-device fallback |
+| `ReplaceBinary` (Windows) | `internal/upgrade/upgrade_windows.go` | Batch trampoline: copy → wait → move → restart services → self-delete |
+| CLI command | `cmd/lmd-ng/upgrade.go` | `lmd-ng upgrade [--force]` — orchestrates full upgrade flow |
+
+### Platform Differences
+
+| Aspect | Linux/macOS | Windows |
+|---|---|---|
+| Binary replacement | `os.Rename` (atomic inode swap) + `chmod 0755`. Cross-device fallback: `copyFile` | Copies new binary as `.exe.new`, writes `upgrade-finalize.bat` trampoline |
+| Service restart | CLI layer calls `service.StartService()` directly after binary swap | Batch script runs `sc start` after 2s delay (wait for old process to release lock) |
+| Lock handling | Old inode stays valid for running processes; new invocations use new inode | `.exe` locked by OS loader — trampoline waits, then moves over |
+| Rollback | Old binary saved as `lmd-ng.old` (same directory) | No rollback — batch script moves `.new` over `.exe` |
+
+### Config
+
+| Field | Default | Purpose |
+|---|---|---|
+| `updater.auto_upgrade_binary` | `false` | Reserved for future auto-upgrade scheduling (not yet implemented) |
+| `updater.release_api_url` | `https://api.github.com/repos/dimaskiddo/lmd-ng/releases/latest` | GitHub Releases API endpoint for version check |
+
+### Archive Extraction
+
+- **Linux/macOS:** `tar.gz` — finds `lmd-ng` binary in archive, extracts to `<basePath>/tmp/`
+- **Windows:** `zip` — finds `lmd-ng.exe` binary, extracts to `<basePath>/tmp/`
+- Asset filename follows goreleaser conventions: `lmd-ng_<ver>_<os>_<arch>` (`.tar.gz` or `.zip`)
+
+### Version Comparison
+
+1. Query `release_api_url` → get `tag_name` (e.g., `v0.2.0`) and `target_commitish`
+2. Compare version string. If same version, compare commit hash (`sameCommit` — prefix match, min 7 chars)
+3. `--force` skips comparison, proceeds directly
+4. If `target_commitish` is not a hex SHA, always upgrade (better to re-download than miss update)
+
+---
+
+## 9. Cross-Platform Concerns
 
 | Concern | Solution |
 |---|---|
@@ -310,7 +369,7 @@ Privilege check (Unix: UID==0; Windows: `Token.IsElevated()`) → resolve execut
 
 ---
 
-## 9. Key Design Decisions
+## 10. Key Design Decisions
 
 1. **No `os/exec` in core** — file traversal via `filepath.WalkDir`, monitoring via `fsnotify`/`fsevents`, signatures via Go `crypto` + `pkg/clamav`
 2. **DBS/RTP split** — signature engine runs as server, monitor as client. Enables multi-host deployments, shared signature database

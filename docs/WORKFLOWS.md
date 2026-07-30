@@ -14,6 +14,7 @@ flowchart TD
     Route -- "update" --> SigUpdate
     Route -- "service" --> ServiceMgmt
     Route -- "quarantine" --> QuarantineMgmt
+    Route -- "upgrade" --> UpgradeFlow
 
     subgraph S1["1. Boot"]
         Boot[load config] --> InitLog[init logger]
@@ -50,6 +51,14 @@ flowchart TD
         SigUpdate[check version] --> Download[download sigpack]
         Download --> Extract[extract to sigs dir]
         Extract --> ReloadEngines[reload engines]
+    end
+
+    subgraph S7["7. Upgrade"]
+        UpgradeFlow[check version] --> DL[download release]
+        DL --> ExtractBin[extract binary]
+        ExtractBin --> StopSvc[stop services]
+        StopSvc --> Replace[platform replace]
+        Replace --> StartSvc[restart services]
     end
 ```
 
@@ -154,6 +163,19 @@ scan command → dbsClient.Ping (single check)
 3. If reachable: `dbsClient.ScanFile(path)` for each matched path
 4. If unreachable: fall back to `ScanCoordinator.StartScan(ctx, path, quarantineMgr)` — local scan using engines directly
 
+### 8. Upgrade (`cmd/lmd-ng/upgrade.go`, `internal/upgrade/`)
+
+1. **Version check:** `Upgrader.LatestVersion(ctx)` → GitHub Releases API → returns `(tag, commitish)`
+2. **Compare:** If same version + same commit → exit (up-to-date). `--force` skips this.
+3. **Download:** `Upgrader.DownloadRelease(ctx, tag, goos, goarch)` → download zip/tgz to temp file → extract lmd-ng binary
+4. **Detect services:** Check if `lmd-ng-dbs` / `lmd-ng-rtp` are installed
+5. **Stop services:** Stop RTP first (if installed), then DBS (if installed)
+6. **Wait:** 1 second for services to fully exit
+7. **Replace binary:** Platform-specific:
+   - **Unix:** `os.Rename` old → `lmd-ng.old`, then `os.Rename` new → `lmd-ng`, `chmod 0755`. Cross-device fallback: `copyFile`
+   - **Windows:** Copy new binary as `lmd-ng.exe.new`, write `upgrade-finalize.bat` trampoline (waits 2s, moves new over old, starts services, self-deletes)
+8. **Restart services:** Start DBS first (if installed), then RTP (after 1s delay)
+
 ---
 
 ## File Naming Conventions
@@ -189,3 +211,6 @@ scan command → dbsClient.Ping (single check)
 | Internet offline (notifications) | `MultiNotifier` checks `HasInternetAccess()` before dispatch. Silently drops if offline |
 | Symlink in walk path | Resolved via `filepath.EvalSymlinks` on root, `os.Stat` on each file |
 | Cross-device quarantine move | Falls back to copy+delete when `os.Rename` returns `EXDEV` |
+| Upgrade download fails | Log error, exit 1. No binary modified |
+| Upgrade service stop fails | Log warning, continue. Binary still replaced |
+| Upgrade binary replace fails | Log error, exit 1. Old binary backed up as `.old` |
