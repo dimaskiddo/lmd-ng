@@ -35,6 +35,14 @@ type SignatureEngine interface {
 	Name() string
 }
 
+// HeuristicScanner is an optional interface implemented by engines that can
+// perform heuristic pattern matching (HEX, NDB). ScanHeuristics is called in a
+// SEPARATE pass after all engines complete their deterministic hash-based Scan,
+// ensuring deterministic matches always take priority over heuristic matches.
+type HeuristicScanner interface {
+	ScanHeuristics(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error)
+}
+
 // LMDSignatureScanner implements the SignatureEngine interface for LMD native signatures.
 type LMDSignatureScanner struct {
 	cfg           *config.Config
@@ -69,12 +77,22 @@ func NewLMDSignatureScanner(cfg *config.Config) (*LMDSignatureScanner, error) {
 	}
 
 	if clamavS != nil && clamavS.TotalSignatures() > 0 {
-		log.Info("RFXN signatures loaded",
+		log.Info("RXFN signatures loaded",
 			"hdb_total", clamavS.HDB.TotalCount(),
+			"mdb_total", clamavS.MDB.TotalCount(),
 			"ndb_total", clamavS.NDB.TotalCount(),
 			"total_signatures", clamavS.TotalSignatures())
 	} else {
-		log.Debug("No RFXN signatures found", "path", rfxnPath)
+		log.Debug("No RXFN signatures found", "path", rfxnPath)
+	}
+
+	if cfg.Scanner.IsHeuristicEnabled("hex") && hexS != nil && hexS.Count() > 0 {
+		log.Warn("HEX heuristic enabled — may produce false positives",
+			"hex_sigs", hexS.Count())
+	}
+	if cfg.Scanner.IsHeuristicEnabled("ndb") && clamavS != nil && clamavS.NDB.TotalCount() > 0 {
+		log.Warn("NDB heuristic enabled — may produce false positives",
+			"ndb_sigs", clamavS.NDB.TotalCount())
 	}
 
 	return &LMDSignatureScanner{
@@ -87,8 +105,10 @@ func NewLMDSignatureScanner(cfg *config.Config) (*LMDSignatureScanner, error) {
 }
 
 // Scan implements the SignatureEngine interface for LMDSignatureScanner.
+// This method is hash-only — deterministic matches (zero false-positive risk).
+// Heuristic pattern matching (HEX, NDB) is in ScanHeuristics().
 func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error) {
-	// --- Hash Scanning (MD5 + SHA1 + SHA256) ---
+	// --- Hash Computation (MD5 + SHA1 + SHA256 in one pass) ---
 	md5Hasher := md5.New()
 	sha1Hasher := sha1.New()
 	sha256Hasher := sha256.New()
@@ -96,6 +116,12 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("failed to seek reader to start for hash: %w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
 	_, err := io.Copy(multiWriter, r)
@@ -107,6 +133,7 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 	sha1Hash := hex.EncodeToString(sha1Hasher.Sum(nil))
 	sha256Hash := hex.EncodeToString(sha256Hasher.Sum(nil))
 
+	// --- LMD Native Hash Signatures ---
 	if sigName := s.md5Scanner.Check(md5Hash, filePath); sigName != "" {
 		return []*ScanResult{{
 			SignatureName: sigName,
@@ -125,17 +152,14 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 		}}, nil
 	}
 
-	// --- Native ClamAV Scanning for RFXN ---
-	if s.clamavScanner != nil && s.clamavScanner.TotalSignatures() > 0 {
+	// --- RFXN HDB Hash Signatures (Maldet core pack) ---
+	if s.clamavScanner != nil {
 		var fileSize int64 = -1
-
-		// Attempt to get file size for hash lookups if it's an os.File
 		if file, ok := r.(*os.File); ok {
 			if info, err := file.Stat(); err == nil {
 				fileSize = info.Size()
 			}
 		} else {
-			// For generic ReadSeeker, determine size by seeking
 			if size, err := r.Seek(0, io.SeekEnd); err == nil {
 				fileSize = size
 			}
@@ -179,71 +203,126 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 				}}, nil
 			}
 		}
+	}
 
-		if s.clamavScanner.NDB.TotalCount() > 0 {
-			if _, err := r.Seek(0, io.SeekStart); err != nil {
-				return nil, fmt.Errorf("failed to seek reader to start for RFXN NDB scan: %w", err)
-			}
+	// --- RFXN MDB PE-Section Hash Signatures ---
+	if s.clamavScanner != nil && s.clamavScanner.MDB.TotalCount() > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
 
-			// Read content up to configured hex depth for body pattern matching
-			hexDepth := int64(s.cfg.Scanner.HexDepth)
-			if hexDepth <= 0 {
-				hexDepth = 65536
+		if _, err := r.Seek(0, io.SeekStart); err == nil {
+			magicBuf := make([]byte, 512)
+			n, readErr := io.ReadFull(r, magicBuf)
+			if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
+				log.Debug("Failed to read magic bytes for RFXN PE detection", "error", readErr)
 			}
+			if n > 0 {
+				if detectMagicType(magicBuf[:n]) == magicTypePE {
+					sections, peErr := ParsePESections(r)
+					if peErr == nil {
+						for _, section := range sections {
+							if s.isPathAllowlisted(filePath) {
+								break
+							}
+							if entry, ok := s.clamavScanner.MDB.LookupMD5(section.MD5, section.Size); ok {
+								return []*ScanResult{{
+									SignatureName: entry.Name,
+									SignatureType: "RFXN-MDB",
+									FilePath:      filePath,
+									DetectionID:   fmt.Sprintf("rfxn.mdb.%s.%s", section.Name, section.MD5),
+								}}, nil
+							}
+							if entry, ok := s.clamavScanner.MDB.LookupSHA1(section.SHA1, section.Size); ok {
+								return []*ScanResult{{
+									SignatureName: entry.Name,
+									SignatureType: "RFXN-MDB",
+									FilePath:      filePath,
+									DetectionID:   fmt.Sprintf("rfxn.mdb.%s.%s", section.Name, section.SHA1),
+								}}, nil
+							}
+							if entry, ok := s.clamavScanner.MDB.LookupSHA256(section.SHA256, section.Size); ok {
+								return []*ScanResult{{
+									SignatureName: entry.Name,
+									SignatureType: "RFXN-MDB",
+									FilePath:      filePath,
+									DetectionID:   fmt.Sprintf("rfxn.mdb.%s.%s", section.Name, section.SHA256),
+								}}, nil
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 
-			limitedReader := io.LimitReader(r, hexDepth)
-			content, err := io.ReadAll(limitedReader)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read content for RFXN NDB scan: %w", err)
-			}
+	return nil, nil
+}
 
-			ndbMatches := s.clamavScanner.NDB.Match(content, fileSize)
-			if len(ndbMatches) > 0 {
-				// Return only the first NDB match
-				return []*ScanResult{{
-					SignatureName: ndbMatches[0],
-					SignatureType: "RFXN-NDB",
-					FilePath:      filePath,
-					DetectionID:   fmt.Sprintf("rfxn.ndb.%s", ndbMatches[0]),
-				}}, nil
-			}
+// ScanHeuristics performs heuristic pattern scanning (HEX + NDB) for the LMD
+// engine. Called in the heuristic pass after all engines complete hash-based Scan.
+func (s *LMDSignatureScanner) ScanHeuristics(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error) {
+	hexOn := s.cfg.Scanner.IsHeuristicEnabled("hex") && s.hexScanner != nil && s.hexScanner.Count() > 0
+	ndbOn := s.cfg.Scanner.IsHeuristicEnabled("ndb") && s.clamavScanner != nil && s.clamavScanner.NDB.TotalCount() > 0
 
-			// Reuse content buffer for HEX scan — no second read needed
-			hexMatches := s.hexScanner.Check(content, filePath)
-			if len(hexMatches) > 0 {
-				return []*ScanResult{{
-					SignatureName: hexMatches[0],
-					SignatureType: "HEX",
-					FilePath:      filePath,
-					DetectionID:   fmt.Sprintf("hex.%s", hexMatches[0]),
-				}}, nil
-			}
-		} else {
-			// No NDB signatures — read content for HEX scan only
-			if _, err := r.Seek(0, io.SeekStart); err != nil {
-				return nil, fmt.Errorf("failed to seek reader to start for HEX scan: %w", err)
-			}
+	if !hexOn && !ndbOn {
+		return nil, nil
+	}
 
-			hexDepth := int64(s.cfg.Scanner.HexDepth)
-			if hexDepth <= 0 {
-				hexDepth = 65536
-			}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("failed to seek reader for heuristic scan: %w", err)
+	}
 
-			limitedReader := io.LimitReader(r, hexDepth)
-			content, err := io.ReadAll(limitedReader)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read content for HEX scan: %w", err)
-			}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 
-			hexMatches := s.hexScanner.Check(content, filePath)
-			if len(hexMatches) > 0 {
-				return []*ScanResult{{
-					SignatureName: hexMatches[0],
-					SignatureType: "HEX",
-					FilePath:      filePath,
-					DetectionID:   fmt.Sprintf("hex.%s", hexMatches[0]),
-				}}, nil
-			}
+	hexDepth := int64(s.cfg.Scanner.HexDepth)
+	if hexDepth <= 0 {
+		hexDepth = 65536
+	}
+	content, err := io.ReadAll(io.LimitReader(r, hexDepth))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read content for heuristic scan: %w", err)
+	}
+
+	// Determine fileSize for NDB matching
+	var fileSize int64 = -1
+	if file, ok := r.(*os.File); ok {
+		if info, err := file.Stat(); err == nil {
+			fileSize = info.Size()
+		}
+	} else {
+		if size, err := r.Seek(0, io.SeekEnd); err == nil {
+			fileSize = size
+		}
+	}
+
+	// HEX (LMD native)
+	if hexOn {
+		if matches := s.hexScanner.Check(content, filePath); len(matches) > 0 {
+			return []*ScanResult{{
+				SignatureName: matches[0],
+				SignatureType: "HEX",
+				FilePath:      filePath,
+				DetectionID:   fmt.Sprintf("hex.%s", matches[0]),
+			}}, nil
+		}
+	}
+
+	// NDB (RFXN)
+	if ndbOn {
+		if matches := s.clamavScanner.NDB.Match(content, fileSize); len(matches) > 0 {
+			return []*ScanResult{{
+				SignatureName: matches[0],
+				SignatureType: "RFXN-NDB",
+				FilePath:      filePath,
+				DetectionID:   fmt.Sprintf("rfxn.ndb.%s", matches[0]),
+			}}, nil
 		}
 	}
 
@@ -273,18 +352,23 @@ func (s *LMDSignatureScanner) SHA256Count() int {
 
 // HEXCount returns the number of loaded HEX pattern signatures.
 func (s *LMDSignatureScanner) HEXCount() int {
-	if s.hexScanner == nil {
+	if s.hexScanner == nil || !s.cfg.Scanner.IsHeuristicEnabled("hex") {
 		return 0
 	}
 	return s.hexScanner.Count()
 }
 
 // RFXNCount returns the total number of RFXN ClamAV signatures (NDB + HDB + MDB).
+// When NDB heuristic is disabled, NDB count is excluded from the total.
 func (s *LMDSignatureScanner) RFXNCount() int {
 	if s.clamavScanner == nil {
 		return 0
 	}
-	return s.clamavScanner.TotalSignatures()
+	total := s.clamavScanner.TotalSignatures()
+	if !s.cfg.Scanner.IsHeuristicEnabled("ndb") {
+		total -= s.clamavScanner.NDB.TotalCount()
+	}
+	return total
 }
 
 // isPathAllowlisted returns true if filePath starts with any configured
@@ -332,6 +416,11 @@ func NewClamAVSignatureEngine(cfg *config.Config) (*ClamAVSignatureEngine, error
 			"mdb_sigs", db.MDB.TotalCount())
 	}
 
+	if cfg.Scanner.IsHeuristicEnabled("ndb") && db.NDB.TotalCount() > 0 {
+		log.Warn("NDB heuristic enabled — may produce false positives",
+			"ndb_sigs", db.NDB.TotalCount())
+	}
+
 	return &ClamAVSignatureEngine{
 		cfg: cfg,
 		db:  db,
@@ -339,14 +428,9 @@ func NewClamAVSignatureEngine(cfg *config.Config) (*ClamAVSignatureEngine, error
 }
 
 // Scan implements the SignatureEngine interface for ClamAVSignatureEngine.
-// It performs two phases:
-//  1. Hash-based detection: Computes MD5, SHA1, and SHA256 in a single pass
-//     and checks against HDB/HSB signatures.
-//  2. Body-based detection: Reads file content up to the configured hex depth
-//     and matches against NDB body signatures.
+// This method is hash-only — deterministic matches (zero false-positive risk).
+// ClamAV NDB body-based matching is in ScanHeuristics().
 func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error) {
-	var results []*ScanResult
-
 	// Determine file size for hash lookups
 	var fileSize int64 = -1
 	if file, ok := r.(*os.File); ok {
@@ -354,7 +438,6 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 			fileSize = info.Size()
 		}
 	} else {
-		// Determine size by seeking
 		if size, err := r.Seek(0, io.SeekEnd); err == nil {
 			fileSize = size
 		}
@@ -363,6 +446,12 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 	// --- Phase 1: Hash-based detection (MD5 + SHA1 + SHA256 in one pass) ---
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("failed to seek to start for hash computation: %w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
 	md5Hasher := md5.New()
@@ -410,10 +499,19 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 
 	// --- Phase 2: PE section hash detection (MDB) ---
 	if s.db.MDB.TotalCount() > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		if _, err := r.Seek(0, io.SeekStart); err == nil {
-			// Read first 512 bytes for magic type detection
 			magicBuf := make([]byte, 512)
-			if n, _ := io.ReadFull(r, magicBuf); n > 0 {
+			n, readErr := io.ReadFull(r, magicBuf)
+			if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
+				log.Debug("Failed to read magic bytes for ClamAV PE detection", "error", readErr)
+			}
+			if n > 0 {
 				magicType := detectMagicType(magicBuf[:n])
 
 				if magicType == magicTypePE {
@@ -453,33 +551,57 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 		}
 	}
 
-	// --- Phase 3: Body/NDB signature matching ---
-	if s.db.NDB.TotalCount() > 0 {
-		if _, err := r.Seek(0, io.SeekStart); err != nil {
-			return nil, fmt.Errorf("failed to seek to start for NDB scan: %w", err)
-		}
+	return nil, nil
+}
 
-		// Read content up to configured hex depth for body pattern matching
-		hexDepth := int64(s.cfg.Scanner.ClamAVHexDepth)
-		if hexDepth <= 0 {
-			hexDepth = 65536 // Default: 64KB
-		}
+// ScanHeuristics performs ClamAV NDB body-pattern scanning for the ClamAV
+// engine. Called in the heuristic pass after all engines complete hash-based Scan.
+func (s *ClamAVSignatureEngine) ScanHeuristics(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error) {
+	if !s.cfg.Scanner.IsHeuristicEnabled("ndb") || s.db == nil || s.db.NDB.TotalCount() == 0 {
+		return nil, nil
+	}
 
-		limitedReader := io.LimitReader(r, hexDepth)
-		content, err := io.ReadAll(limitedReader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read content for NDB scan: %w", err)
+	// Determine file size for NDB matching
+	var fileSize int64 = -1
+	if file, ok := r.(*os.File); ok {
+		if info, err := file.Stat(); err == nil {
+			fileSize = info.Size()
 		}
+	} else {
+		if size, err := r.Seek(0, io.SeekEnd); err == nil {
+			fileSize = size
+		}
+	}
 
-		ndbMatches := s.db.NDB.Match(content, fileSize)
-		for _, sigName := range ndbMatches {
-			results = append(results, &ScanResult{
-				SignatureName: sigName,
-				SignatureType: "ClamAV-NDB",
-				FilePath:      filePath,
-				DetectionID:   fmt.Sprintf("clamav.ndb.%s", sigName),
-			})
-		}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("failed to seek to start for NDB scan: %w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	hexDepth := int64(s.cfg.Scanner.ClamAVHexDepth)
+	if hexDepth <= 0 {
+		hexDepth = 65536
+	}
+
+	content, err := io.ReadAll(io.LimitReader(r, hexDepth))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read content for NDB scan: %w", err)
+	}
+
+	var results []*ScanResult
+	ndbMatches := s.db.NDB.Match(content, fileSize)
+	for _, sigName := range ndbMatches {
+		results = append(results, &ScanResult{
+			SignatureName: sigName,
+			SignatureType: "ClamAV-NDB",
+			FilePath:      filePath,
+			DetectionID:   fmt.Sprintf("clamav.ndb.%s", sigName),
+		})
 	}
 
 	return results, nil
@@ -500,7 +622,7 @@ func (s *ClamAVSignatureEngine) HDBCount() int {
 
 // NDBCount returns the number of NDB (body pattern) signatures.
 func (s *ClamAVSignatureEngine) NDBCount() int {
-	if s.db == nil {
+	if s.db == nil || !s.cfg.Scanner.IsHeuristicEnabled("ndb") {
 		return 0
 	}
 	return s.db.NDB.TotalCount()
@@ -519,7 +641,11 @@ func (s *ClamAVSignatureEngine) TotalSignatures() int {
 	if s.db == nil {
 		return 0
 	}
-	return s.db.TotalSignatures()
+	total := s.db.TotalSignatures()
+	if !s.cfg.Scanner.IsHeuristicEnabled("ndb") {
+		total -= s.db.NDB.TotalCount()
+	}
+	return total
 }
 
 // CVDVersions returns the CVD database versions keyed by filename (e.g. "main.cvd" → 62).

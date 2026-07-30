@@ -443,6 +443,7 @@ func (s *Server) handleStatusRequest(conn net.Conn) {
 		SignatureCounts: make(map[string]int),
 	}
 
+	var totalSigs int
 	for _, engine := range engines {
 		data.EngineNames = append(data.EngineNames, engine.Name())
 
@@ -452,19 +453,20 @@ func (s *Server) handleStatusRequest(conn net.Conn) {
 			data.SignatureCounts["SHA256 Hashes"] = e.SHA256Count()
 			data.SignatureCounts["HEX Patterns"] = e.HEXCount()
 			data.SignatureCounts["RFXN Signatures"] = e.RFXNCount()
-			data.SignatureCounts["Total"] = e.MD5Count() + e.SHA256Count() + e.HEXCount() + e.RFXNCount()
+			totalSigs += e.MD5Count() + e.SHA256Count() + e.HEXCount() + e.RFXNCount()
 
 		case *scanner.ClamAVSignatureEngine:
 			data.SignatureCounts["HDB Signatures"] = e.HDBCount()
 			data.SignatureCounts["NDB Signatures"] = e.NDBCount()
 			data.SignatureCounts["MDB Signatures"] = e.MDBCount()
-			data.SignatureCounts["Total"] = e.TotalSignatures()
+			totalSigs += e.TotalSignatures()
 
 			if cvdVersions := e.CVDVersions(); len(cvdVersions) > 0 {
 				data.CVDDatabaseVersions = cvdVersions
 			}
 		}
 	}
+	data.SignatureCounts["Total"] = totalSigs
 
 	payload, err := protocol.EncodeStatusData(data)
 	if err != nil {

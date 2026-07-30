@@ -16,13 +16,20 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/quarantine"
 )
 
-// ScanDataWithEngines runs all provided signature engines against the given
-// seekable reader. It is the single source of truth for the engine-scan loop.
-// Callers are responsible for logging detections with their own context prefix.
-// Returns matched results and any fatal error.
+// ScanDataWithEngines runs provided signature engines against the given
+// seekable reader in two passes:
+//
+// Pass 1 (deterministic): calls engine.Scan() on each engine — hash-only,
+// zero false-positive risk. Short-circuits on first detection.
+//
+// Pass 2 (heuristic): calls ScanHeuristics() on engines that implement
+// HeuristicScanner — pattern-based, FP-prone, gated by config. Short-circuits
+// on first detection.
+//
+// This ordering guarantees deterministic hash matches always take priority over
+// heuristic pattern matches across all engines.
 func ScanDataWithEngines(ctx context.Context, engines []SignatureEngine, r io.ReadSeeker, filePath string) ([]*ScanResult, error) {
-	var results []*ScanResult
-
+	// --- Pass 1: Hash-based scanning (deterministic, zero FP) ---
 	for _, engine := range engines {
 		select {
 		case <-ctx.Done():
@@ -31,26 +38,52 @@ func ScanDataWithEngines(ctx context.Context, engines []SignatureEngine, r io.Re
 		default:
 		}
 
-		// Rewind reader for each engine so every engine starts from byte 0
 		if _, err := r.Seek(0, io.SeekStart); err != nil {
 			return nil, fmt.Errorf("failed to seek reader to start for engine %s: %w", engine.Name(), err)
 		}
 
 		res, err := engine.Scan(ctx, r, filePath)
 		if err != nil {
-			log.Error("Signature engine failed to scan", "engine", engine.Name(), "filepath", filePath, "error", err)
+			log.Error("Signature engine scan failed", "engine", engine.Name(), "filepath", filePath, "error", err)
 			continue
 		}
 
 		if len(res) > 0 {
-			results = append(results, res...)
-			// Stop scanning with remaining engines once malware is detected.
-			// One positive detection is sufficient to trigger quarantine.
-			break
+			// Deterministic match — no need for heuristic scan
+			return res, nil
 		}
 	}
 
-	return results, nil
+	// --- Pass 2: Heuristic scanning (FP-prone, gated by config) ---
+	for _, engine := range engines {
+		hs, ok := engine.(HeuristicScanner)
+		if !ok {
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+
+		default:
+		}
+
+		if _, err := r.Seek(0, io.SeekStart); err != nil {
+			return nil, fmt.Errorf("failed to seek reader for heuristic scan %s: %w", engine.Name(), err)
+		}
+
+		res, err := hs.ScanHeuristics(ctx, r, filePath)
+		if err != nil {
+			log.Error("Heuristic scan failed", "engine", engine.Name(), "filepath", filePath, "error", err)
+			continue
+		}
+
+		if len(res) > 0 {
+			return res, nil
+		}
+	}
+
+	return nil, nil
 }
 
 // ScanCoordinator orchestrates file system traversal and signature scanning.

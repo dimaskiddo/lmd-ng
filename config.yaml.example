@@ -53,6 +53,8 @@ scanner:
   clamav_enabled: false
   clamav_db_path: "./clamav"
   clamav_hex_depth: 65536
+  enabled_heuristics:                 # Heuristic detection methods
+    - "hex"                           # Possible values: "hex", "ndb", "yara"
   min_filesize: 0
   max_filesize: 20M
   max_depth: 0

@@ -104,6 +104,20 @@ type ScannerConfig struct {
 	// If non-empty, this list replaces defaults entirely (not merged).
 	// Leave empty to use built-in AV-informed defaults.
 	ScanIgnoreFilePatterns []string `yaml:"scan_ignore_file_patterns" mapstructure:"scan_ignore_file_patterns"`
+	// EnabledHeuristics controls which heuristic detection methods are active.
+	// Hash-based scanning (MD5, SHA256, HDB, MDB) is always active.
+	// Default: ["hex"]. Set to [] for hash-only mode (zero false positives).
+	EnabledHeuristics []string `yaml:"enabled_heuristics" mapstructure:"enabled_heuristics"`
+}
+
+// IsHeuristicEnabled returns true if the named heuristic is in the enabled list.
+func (sc *ScannerConfig) IsHeuristicEnabled(name string) bool {
+	for _, h := range sc.EnabledHeuristics {
+		if h == name {
+			return true
+		}
+	}
+	return false
 }
 
 // SchedulerConfig holds scheduling settings for updates and scans.
@@ -234,6 +248,7 @@ func setDefaultConfig(config *Config) {
 		// Office Temp Lock Files
 		"~$*",
 	}
+	config.Scanner.EnabledHeuristics = []string{"hex"}
 
 	config.Scheduler.UpdateInterval = "@daily"
 	config.Scheduler.ScanInterval = "@every 4h"

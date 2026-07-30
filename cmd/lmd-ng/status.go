@@ -29,7 +29,6 @@ func runStatus(cmd *cobra.Command, args []string) {
 	cfg := cfgMgr.GetConfig()
 
 	fmt.Println("LMD-NG Status")
-	fmt.Println("By Dimas Restu H <drh.dimasrestu@gmail.com>")
 	fmt.Println(strings.Repeat("━", 62))
 	fmt.Println()
 
