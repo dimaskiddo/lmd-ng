@@ -102,6 +102,14 @@ Subcommands:
 				notifiers = append(notifiers, notifier.NewTelegramNotifier(&cfg.Notification.Telegram))
 			}
 
+			if cfg.Notification.Discord.Enabled {
+				notifiers = append(notifiers, notifier.NewDiscordNotifier(&cfg.Notification.Discord))
+			}
+
+			if cfg.Notification.Slack.Enabled {
+				notifiers = append(notifiers, notifier.NewSlackNotifier(&cfg.Notification.Slack))
+			}
+
 			multiNotifier := notifier.NewMultiNotifier(notifiers...)
 
 			rtpSvc, err := rtp.NewRTP(cfg, multiNotifier)
@@ -231,6 +239,14 @@ quarantine locally. The DBS server must be running before starting RTP.`,
 
 			if cfg.Notification.Telegram.Enabled {
 				notifiers = append(notifiers, notifier.NewTelegramNotifier(&cfg.Notification.Telegram))
+			}
+
+			if cfg.Notification.Discord.Enabled {
+				notifiers = append(notifiers, notifier.NewDiscordNotifier(&cfg.Notification.Discord))
+			}
+
+			if cfg.Notification.Slack.Enabled {
+				notifiers = append(notifiers, notifier.NewSlackNotifier(&cfg.Notification.Slack))
 			}
 
 			multiNotifier := notifier.NewMultiNotifier(notifiers...)

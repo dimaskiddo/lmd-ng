@@ -128,7 +128,8 @@ notification:
     smtp_port: 587
     smtp_username: "user@example.com"
     smtp_password: "secretpassword"
-    smtp_use_ssl_tls: false           # Set to true for port 465, false for 587 (uses STARTTLS if available)
+    # Set to true for port 465, false for 587
+    smtp_use_ssl_tls: false
     sender: "lmd-ng@example.com"
     recipients:
       - "admin@example.com"
@@ -137,3 +138,13 @@ notification:
     enabled: false
     bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
     chat_id: "YOUR_TELEGRAM_CHAT_ID"
+
+  discord:
+    enabled: false
+    # Create via Server Settings > Integrations > Webhooks. Treat URL as secret.
+    webhook_url: "YOUR_DISCORD_WEBHOOK_URL"
+
+  slack:
+    enabled: false
+    # Create via api.slack.com > Apps > Incoming Webhooks. Treat URL as secret.
+    webhook_url: "YOUR_SLACK_WEBHOOK_URL"

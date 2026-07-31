@@ -168,6 +168,8 @@ type UpdaterConfig struct {
 type NotificationConfig struct {
 	Email    EmailNotificationConfig    `yaml:"email" mapstructure:"email"`
 	Telegram TelegramNotificationConfig `yaml:"telegram" mapstructure:"telegram"`
+	Discord  DiscordNotificationConfig  `yaml:"discord" mapstructure:"discord"`
+	Slack    SlackNotificationConfig    `yaml:"slack" mapstructure:"slack"`
 }
 
 // EmailNotificationConfig holds email notification settings.
@@ -187,6 +189,18 @@ type TelegramNotificationConfig struct {
 	Enabled  bool   `yaml:"enabled" mapstructure:"enabled"`
 	BotToken string `yaml:"bot_token" mapstructure:"bot_token"`
 	ChatID   string `yaml:"chat_id" mapstructure:"chat_id"`
+}
+
+// DiscordNotificationConfig holds Discord webhook notification settings.
+type DiscordNotificationConfig struct {
+	Enabled    bool   `yaml:"enabled" mapstructure:"enabled"`
+	WebhookURL string `yaml:"webhook_url" mapstructure:"webhook_url"`
+}
+
+// SlackNotificationConfig holds Slack incoming webhook notification settings.
+type SlackNotificationConfig struct {
+	Enabled    bool   `yaml:"enabled" mapstructure:"enabled"`
+	WebhookURL string `yaml:"webhook_url" mapstructure:"webhook_url"`
 }
 
 // setDefaultConfig sets default values for the configuration.
@@ -304,6 +318,12 @@ func setDefaultConfig(config *Config) {
 	config.Notification.Telegram.Enabled = false
 	config.Notification.Telegram.BotToken = "YOUR_TELEGRAM_BOT_TOKEN"
 	config.Notification.Telegram.ChatID = "YOUR_TELEGRAM_CHAT_ID"
+
+	config.Notification.Discord.Enabled = false
+	config.Notification.Discord.WebhookURL = ""
+
+	config.Notification.Slack.Enabled = false
+	config.Notification.Slack.WebhookURL = ""
 }
 
 // ResolvePaths ensures all directory and file paths in the configuration
