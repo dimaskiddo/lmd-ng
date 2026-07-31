@@ -3,6 +3,7 @@ package dbs
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -251,7 +252,8 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	// Read the first frame to determine request type
 	msgType, payload, err := protocol.ReadFrame(conn)
 	if err != nil {
-		if err == io.EOF || strings.Contains(err.Error(), "broken pipe") || strings.Contains(err.Error(), "connection reset by peer") {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+			strings.Contains(err.Error(), "broken pipe") || strings.Contains(err.Error(), "connection reset by peer") {
 			log.Debug("Client disconnected before sending request", "error", err)
 			return
 		}
@@ -494,7 +496,8 @@ func (s *Server) handleStatusRequest(conn net.Conn) {
 // sendError sends an error message back to the client.
 func (s *Server) sendError(conn net.Conn, errMsg string) {
 	if err := protocol.WriteFrame(conn, protocol.MsgError, []byte(errMsg)); err != nil {
-		if err == io.EOF || strings.Contains(err.Error(), "broken pipe") || strings.Contains(err.Error(), "connection reset by peer") {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+			strings.Contains(err.Error(), "broken pipe") || strings.Contains(err.Error(), "connection reset by peer") {
 			log.Debug("Failed to send error to client (client disconnected)", "error", err)
 		} else {
 			log.Error("Failed to send error to client", "error", err)
