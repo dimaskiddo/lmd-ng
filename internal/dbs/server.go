@@ -327,8 +327,12 @@ func (s *Server) handleScanRequest(ctx context.Context, conn net.Conn, requestPa
 			return
 		}
 		defer func() {
-			tempFile.Close()
-			os.Remove(tempFile.Name())
+			if closeErr := tempFile.Close(); closeErr != nil {
+				log.Debug("Failed to close temp scan file", "path", tempFile.Name(), "error", closeErr)
+			}
+			if removeErr := os.Remove(tempFile.Name()); removeErr != nil {
+				log.Debug("Failed to remove temp scan file", "path", tempFile.Name(), "error", removeErr)
+			}
 		}()
 	} else {
 		memoryBuffer = &bytes.Buffer{}

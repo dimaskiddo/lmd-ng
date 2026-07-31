@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -59,7 +60,13 @@ Subcommands:
 
 			cfg := cfgMgr.GetConfig()
 
-			go handleConfigReload(ctx)
+			var wg sync.WaitGroup
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				handleConfigReload(ctx)
+			}()
 
 			// --- Start DBS server in background ---
 			engines, err := buildEngines(cfg)
@@ -84,9 +91,15 @@ Subcommands:
 				os.Exit(1)
 			}
 
-			go updateSched.Start(ctx)
-
+			wg.Add(1)
 			go func() {
+				defer wg.Done()
+				updateSched.Start(ctx)
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
 				if err := server.Serve(ctx); err != nil {
 					log.Error("DBS server error", "error", err)
 				}
@@ -131,9 +144,15 @@ Subcommands:
 				os.Exit(1)
 			}
 
-			go scanSched.Start(ctx)
-
+			wg.Add(1)
 			go func() {
+				defer wg.Done()
+				scanSched.Start(ctx)
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
 				if err := rtpSvc.Start(ctx); err != nil && err != context.Canceled {
 					log.Error("RTP error", "error", err)
 				}
@@ -148,6 +167,7 @@ Subcommands:
 			scanSched.Stop()
 			updateSched.Stop()
 			server.Shutdown()
+			wg.Wait()
 		},
 	}
 
@@ -172,7 +192,13 @@ Signature reload is triggered via socket command from 'lmd-ng update'.`,
 
 			cfg := cfgMgr.GetConfig()
 
-			go handleConfigReload(ctx)
+			var wg sync.WaitGroup
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				handleConfigReload(ctx)
+			}()
 
 			engines, err := buildEngines(cfg)
 			if err != nil {
@@ -196,9 +222,15 @@ Signature reload is triggered via socket command from 'lmd-ng update'.`,
 				os.Exit(1)
 			}
 
-			go updateSched.Start(ctx)
-
+			wg.Add(1)
 			go func() {
+				defer wg.Done()
+				updateSched.Start(ctx)
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
 				if err := server.Serve(ctx); err != nil {
 					log.Error("DBS server error", "error", err)
 				}
@@ -211,6 +243,7 @@ Signature reload is triggered via socket command from 'lmd-ng update'.`,
 
 			updateSched.Stop()
 			server.Shutdown()
+			wg.Wait()
 		},
 	}
 }
@@ -230,7 +263,13 @@ quarantine locally. The DBS server must be running before starting RTP.`,
 
 			cfg := cfgMgr.GetConfig()
 
-			go handleConfigReload(ctx)
+			var wg sync.WaitGroup
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				handleConfigReload(ctx)
+			}()
 
 			var notifiers []notifier.Notifier
 			if cfg.Notification.Email.Enabled {
@@ -270,9 +309,15 @@ quarantine locally. The DBS server must be running before starting RTP.`,
 				os.Exit(1)
 			}
 
-			go scanSched.Start(ctx)
-
+			wg.Add(1)
 			go func() {
+				defer wg.Done()
+				scanSched.Start(ctx)
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
 				if err := rtpSvc.Start(ctx); err != nil && err != context.Canceled {
 					log.Error("RTP error", "error", err)
 				}
@@ -285,6 +330,7 @@ quarantine locally. The DBS server must be running before starting RTP.`,
 
 			rtpSvc.Stop()
 			scanSched.Stop()
+			wg.Wait()
 		},
 	}
 }

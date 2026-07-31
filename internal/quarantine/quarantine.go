@@ -230,19 +230,19 @@ func (qm *QuarantineManager) Quarantine(ctx context.Context, filePath string, de
 // setuid/setgid/sticky), ownership (UID/GID), and modification time.
 func (qm *QuarantineManager) Restore(ctx context.Context, quarantinePath string) (string, error) {
 	metadataFilePath := quarantinePath + ".metadata.json"
-	metadataBytes, err := os.ReadFile(metadataFilePath)
 
+	f, err := os.Open(metadataFilePath)
 	if os.IsNotExist(err) {
 		return "", fmt.Errorf("quarantine metadata file not found for %s: %w", quarantinePath, err)
 	}
-
 	if err != nil {
-		return "", fmt.Errorf("failed to read quarantine metadata file %s: %w", metadataFilePath, err)
+		return "", fmt.Errorf("failed to open quarantine metadata file %s: %w", metadataFilePath, err)
 	}
+	defer f.Close()
 
 	var metadata Metadata
-	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-		return "", fmt.Errorf("failed to unmarshal quarantine metadata: %w", err)
+	if err := json.NewDecoder(f).Decode(&metadata); err != nil {
+		return "", fmt.Errorf("failed to decode quarantine metadata: %w", err)
 	}
 
 	// Temporarily grant owner-read to open the locked file
@@ -366,17 +366,19 @@ func (qm *QuarantineManager) List(ctx context.Context) ([]ListEntry, error) {
 		}
 
 		metadataPath := filepath.Join(qm.cfg.Path, name)
-		data, err := os.ReadFile(metadataPath)
+		f, err := os.Open(metadataPath)
 		if err != nil {
-			log.Warn("Failed to read quarantine metadata file, skipping", "file", metadataPath, "error", err)
+			log.Warn("Failed to open quarantine metadata file, skipping", "file", metadataPath, "error", err)
 			continue
 		}
 
 		var meta Metadata
-		if err := json.Unmarshal(data, &meta); err != nil {
-			log.Warn("Failed to parse quarantine metadata file, skipping", "file", metadataPath, "error", err)
+		if err := json.NewDecoder(f).Decode(&meta); err != nil {
+			f.Close()
+			log.Warn("Failed to decode quarantine metadata file, skipping", "file", metadataPath, "error", err)
 			continue
 		}
+		f.Close()
 
 		baseName := strings.TrimSuffix(name, ".quarantined.metadata.json")
 

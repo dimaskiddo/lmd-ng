@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"sync"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/notifier"
@@ -25,7 +26,8 @@ type Monitor struct {
 	scanFunc ScanFunc
 	notifier notifier.Notifier
 	impl     monitorImpl
-	sem      chan struct{} // bounded concurrency for event handlers
+	sem      chan struct{}  // bounded concurrency for event handlers
+	wg       sync.WaitGroup // tracks in-flight event handler goroutines
 }
 
 // monitorImpl is the platform-specific monitor backend.

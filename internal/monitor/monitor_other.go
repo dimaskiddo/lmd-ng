@@ -177,8 +177,12 @@ func (om *otherMonitor) Start(ctx context.Context) error {
 				return fmt.Errorf("fsnotify event channel closed")
 			}
 			om.parent.sem <- struct{}{}
+			om.parent.wg.Add(1)
 			go func() {
-				defer func() { <-om.parent.sem }()
+				defer func() {
+					<-om.parent.sem
+					om.parent.wg.Done()
+				}()
 				om.handleEvent(ctx, event.Name, event.Op)
 			}()
 
@@ -195,7 +199,9 @@ func (om *otherMonitor) Start(ctx context.Context) error {
 	}
 }
 
-// Stop stops the fsnotify watcher.
+// Stop stops the fsnotify watcher and waits for in-flight event handlers to complete.
 func (om *otherMonitor) Stop() error {
-	return om.watcher.Close()
+	err := om.watcher.Close()
+	om.parent.wg.Wait()
+	return err
 }

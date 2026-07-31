@@ -170,7 +170,9 @@ func (dm *darwinMonitor) Start(ctx context.Context) error {
 	merged := make(chan fsevents.Event, 4096)
 
 	for _, es := range dm.streams {
+		dm.parent.wg.Add(1)
 		go func(events chan []fsevents.Event) {
+			defer dm.parent.wg.Done()
 			for batch := range events {
 				for _, ev := range batch {
 					merged <- ev
@@ -195,8 +197,12 @@ func (dm *darwinMonitor) Start(ctx context.Context) error {
 		select {
 		case ev := <-merged:
 			dm.parent.sem <- struct{}{}
+			dm.parent.wg.Add(1)
 			go func() {
-				defer func() { <-dm.parent.sem }()
+				defer func() {
+					<-dm.parent.sem
+					dm.parent.wg.Done()
+				}()
 				dm.handleEvent(ctx, ev.Path, ev.Flags)
 			}()
 
@@ -211,11 +217,12 @@ func (dm *darwinMonitor) Start(ctx context.Context) error {
 	}
 }
 
-// Stop stops all FSEvent streams.
+// Stop stops all FSEvent streams and waits for in-flight goroutines to complete.
 func (dm *darwinMonitor) Stop() error {
 	for _, es := range dm.streams {
 		es.Stop()
 	}
 
+	dm.parent.wg.Wait()
 	return nil
 }
