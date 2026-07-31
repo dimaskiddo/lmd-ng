@@ -16,6 +16,7 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
 	"github.com/dimaskiddo/lmd-ng/internal/quarantine"
+	"github.com/dimaskiddo/lmd-ng/internal/util"
 )
 
 // ScanDataWithEngines runs provided signature engines against the given
@@ -262,11 +263,31 @@ func (sc *ScanCoordinator) ScanFile(ctx context.Context, filePath string) ([]*Sc
 		return nil, fmt.Errorf("failed to stat file %s for scanning: %w", filePath, err)
 	}
 
-	// Reject symlinks — prevents TOCTOU attacks where a safe file is replaced
-	// with a symlink between stat and open.
+	// Resolve symlinks to their true target path, limited by max_symlink_depth.
+	// Skips files whose symlink chain exceeds the depth limit.
 	if info.Mode()&os.ModeSymlink != 0 {
-		log.Debug("Skipping symlink", "filepath", filePath)
-		return nil, nil
+		resolved, err := util.ResolveSymlink(filePath, sc.cfg.Scanner.MaxSymlinkDepth)
+		if err != nil {
+			log.Debug("Skipping symlink (resolution failed)", "filepath", filePath, "error", err)
+			return nil, nil
+		}
+		info, err = os.Lstat(resolved)
+		if err != nil {
+			if os.IsNotExist(err) {
+				log.Debug("Symlink target no longer exists", "filepath", filePath, "resolved", resolved)
+				return nil, nil
+			}
+			if os.IsPermission(err) {
+				log.Warn("Permission denied on symlink target", "filepath", filePath, "resolved", resolved)
+				return nil, nil
+			}
+			return nil, fmt.Errorf("failed to stat symlink target %s: %w", resolved, err)
+		}
+		if !info.Mode().IsRegular() {
+			log.Debug("Symlink target is not a regular file", "filepath", filePath, "resolved", resolved, "mode", info.Mode())
+			return nil, nil
+		}
+		filePath = resolved
 	}
 
 	if !info.Mode().IsRegular() {

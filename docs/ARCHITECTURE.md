@@ -204,7 +204,7 @@ Reads first `clamav_hex_depth` bytes (default 64KB), runs NDB body-pattern match
 
 Filter pipeline applied per file:
 
-1. Resolve symlinks via `os.Stat`
+1. Resolve symlinks via recursive Lstat/Readlink chain (depth-gated by `max_symlink_depth`)
 2. Skip non-regular files
 3. Min/max file size check
 4. Owner filters (Unix: UID/GID via `syscall.Stat_t`; Windows: no-op)
@@ -269,7 +269,7 @@ Minimum 4 characters. Scans `*.quarantined` files, extracts hex ID after last `.
 | `server` | Network (unix/tcp), socket/address, connection pool, TLS |
 | `quarantine` | Enabled, path, encryption key |
 | `monitor` | Watch paths, exclude dirs (auto-appended: sigs, clamav, quarantine, logs) |
-| `scanner` | Signature path, clamav toggle, file size/depth filters, CPU limits, owner/regex filters |
+| `scanner` | Signature path, clamav toggle, file size/depth filters, symlink recursion depth, CPU limits, owner/regex filters |
 | `scheduler` | Update interval (cron), scan interval (cron) |
 | `updater` | Auto-update, LMD URLs, ClamAV mirror/databases, binary auto-upgrade, release API |
 | `notification` | Email (SMTP) + Telegram (Bot API) |

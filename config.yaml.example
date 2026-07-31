@@ -58,6 +58,7 @@ scanner:
   min_filesize: 0
   max_filesize: 20M
   max_depth: 0
+  max_symlink_depth: 0                # Max symlink recursion depth (0 = no limit, hard cap 255)
   hex_depth: 262144                   # Maldet default: 256KB (~98.9% pattern coverage)
   cpu_limit: 0                        # 0 = auto-detect (uses half of available CPU cores)
   concurrency_limit: 192              # Max concurrent DBS scan requests (DBS client path)

@@ -198,12 +198,18 @@ func (w *Walker) ApplyFilters(ctx context.Context, path string, info os.FileInfo
 
 	// If it is a symlink, resolve it to get its true type and size
 	if info.Mode()&fs.ModeSymlink != 0 {
-		targetInfo, err := os.Stat(path)
+		resolved, err := util.ResolveSymlink(path, w.cfg.Scanner.MaxSymlinkDepth)
 		if err != nil {
-			log.Debug("Failed to stat symlink target", "path", path, "error", err)
+			log.Debug("Failed to resolve symlink", "path", path, "error", err)
+			return nil
+		}
+		targetInfo, err := os.Lstat(resolved)
+		if err != nil {
+			log.Debug("Failed to stat symlink target", "path", path, "resolved", resolved, "error", err)
 			return nil
 		}
 		info = targetInfo
+		path = resolved
 	}
 
 	// If it's not a regular file, skip it (e.g., devices, sockets, or symlinks to directories)

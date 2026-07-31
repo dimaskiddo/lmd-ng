@@ -259,7 +259,7 @@ flowchart TD
 | SIGHUP reload fails | Log error, old config remains active. Engines unaffected |
 | Signature download fails | Log error, existing signatures remain. Update skipped |
 | Internet offline (notifications) | `MultiNotifier` checks `HasInternetAccess()` before dispatch. Silently drops if offline |
-| Symlink in walk path | Resolved via `filepath.EvalSymlinks` on root; symlinks rejected at scan entry points (DBS client, ScanCoordinator) via `os.Lstat` |
+| Symlink in walk path | Resolved via `filepath.EvalSymlinks` on root; symlinks resolved to true target path via recursive Lstat/Readlink chain (depth-gated by `max_symlink_depth`); skipped if depth exceeded or target not regular file |
 | Cross-device quarantine move | Falls back to copy+delete when `os.Rename` returns `EXDEV` |
 | Upgrade download fails | Log error, exit 1. No binary modified |
 | Upgrade service stop fails | Log warning, continue. Binary still replaced |

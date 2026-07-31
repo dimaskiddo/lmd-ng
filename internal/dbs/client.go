@@ -78,11 +78,12 @@ func isConnFatal(err error) bool {
 // It opens a new TLS connection per operation (scan, ping, reload) to keep
 // the protocol simple and stateless.
 type Client struct {
-	tlsConfig *tls.Config
-	network   string
-	address   string
-	pool      chan *pooledConn
-	sem       chan struct{}
+	tlsConfig       *tls.Config
+	network         string
+	address         string
+	pool            chan *pooledConn
+	sem             chan struct{}
+	maxSymlinkDepth int
 }
 
 // NewClient creates a new DBS client from the application configuration.
@@ -112,11 +113,12 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	}
 
 	return &Client{
-		tlsConfig: tlsConfig,
-		network:   network,
-		address:   address,
-		pool:      make(chan *pooledConn, cfg.Server.ConnectionPoolLimit),
-		sem:       make(chan struct{}, cfg.Scanner.ConcurrencyLimit),
+		tlsConfig:       tlsConfig,
+		network:         network,
+		address:         address,
+		pool:            make(chan *pooledConn, cfg.Server.ConnectionPoolLimit),
+		sem:             make(chan struct{}, cfg.Scanner.ConcurrencyLimit),
+		maxSymlinkDepth: cfg.Scanner.MaxSymlinkDepth,
 	}, nil
 }
 
@@ -294,10 +296,27 @@ func (c *Client) ScanFile(ctx context.Context, filePath string) ([]*scanner.Scan
 		return nil, fmt.Errorf("failed to stat file %s: %w", filePath, err)
 	}
 
-	// Reject symlinks — prevents TOCTOU attacks
+	// Resolve symlinks to their true target path, limited by max_symlink_depth.
+	// Skips files whose symlink chain exceeds the depth limit.
 	if info.Mode()&os.ModeSymlink != 0 {
-		log.Debug("Skipping symlink", "filepath", filePath)
-		return nil, nil
+		resolved, err := util.ResolveSymlink(filePath, c.maxSymlinkDepth)
+		if err != nil {
+			log.Debug("Skipping symlink (resolution failed)", "filepath", filePath, "error", err)
+			return nil, nil
+		}
+		info, err = os.Lstat(resolved)
+		if err != nil {
+			if os.IsNotExist(err) {
+				log.Debug("Symlink target no longer exists", "filepath", filePath, "resolved", resolved)
+				return nil, nil
+			}
+			return nil, fmt.Errorf("failed to stat symlink target %s: %w", resolved, err)
+		}
+		if !info.Mode().IsRegular() {
+			log.Debug("Symlink target is not a regular file", "filepath", filePath, "resolved", resolved, "mode", info.Mode())
+			return nil, nil
+		}
+		filePath = resolved
 	}
 
 	if !info.Mode().IsRegular() {
@@ -383,9 +402,17 @@ func (c *Client) attemptScanFile(ctx context.Context, filePath string, fileSize 
 		}
 		return nil, fmt.Errorf("failed to re-stat file %s: %w", filePath, reErr)
 	}
-	// Reject symlinks — prevents TOCTOU attacks
+	// Resolve symlinks again at scan-time (defense-in-depth against TOCTOU).
 	if reInfo.Mode()&os.ModeSymlink != 0 {
-		return nil, nil
+		resolved, resErr := util.ResolveSymlink(filePath, c.maxSymlinkDepth)
+		if resErr != nil {
+			return nil, nil
+		}
+		reInfo, resErr = os.Lstat(resolved)
+		if resErr != nil || !reInfo.Mode().IsRegular() {
+			return nil, nil
+		}
+		filePath = resolved
 	}
 	if !reInfo.Mode().IsRegular() {
 		return nil, nil

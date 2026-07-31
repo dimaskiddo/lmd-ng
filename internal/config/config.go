@@ -83,6 +83,7 @@ type ScannerConfig struct {
 	MaxFilesize      string   `yaml:"max_filesize" mapstructure:"max_filesize"`
 	MinFilesize      int64    `yaml:"min_filesize" mapstructure:"min_filesize"`
 	MaxDepth         int      `yaml:"max_depth" mapstructure:"max_depth"`
+	MaxSymlinkDepth  int      `yaml:"max_symlink_depth" mapstructure:"max_symlink_depth"`
 	HexDepth         int      `yaml:"hex_depth" mapstructure:"hex_depth"`
 	CPULimit         int      `yaml:"cpu_limit" mapstructure:"cpu_limit"`
 	ConcurrencyLimit int      `yaml:"concurrency_limit" mapstructure:"concurrency_limit"`
@@ -125,6 +126,9 @@ func (sc *ScannerConfig) IsHeuristicEnabled(name string) bool {
 func (sc *ScannerConfig) Validate() error {
 	if sc.MaxDepth < 0 {
 		return fmt.Errorf("max_depth must be >= 0, got %d", sc.MaxDepth)
+	}
+	if sc.MaxSymlinkDepth < 0 {
+		return fmt.Errorf("max_symlink_depth must be >= 0, got %d", sc.MaxSymlinkDepth)
 	}
 	if sc.HexDepth < 0 {
 		return fmt.Errorf("hex_depth must be >= 0, got %d", sc.HexDepth)
@@ -242,6 +246,7 @@ func setDefaultConfig(config *Config) {
 	config.Scanner.MinFilesize = 0
 	config.Scanner.MaxFilesize = "20M"
 	config.Scanner.MaxDepth = 0
+	config.Scanner.MaxSymlinkDepth = 0
 	config.Scanner.HexDepth = 262144
 	config.Scanner.CPULimit = 0
 	config.Scanner.ConcurrencyLimit = 192
