@@ -17,7 +17,7 @@ A centralized **Database Signature Service (DBS)** loads signature databases int
 *   **📦 Native ClamAV Loader:** Pure Go support for ClamAV databases (`.cvd`, `.cld`, `.ndb`, `.hdb`, `.mdb`). No `libclamav` or `os/exec` dependencies.
 *   **📥 Secure Quarantine:** AES-256-GCM encryption, POSIX attribute preservation, short-ID lookup.
 *   **🔒 Secure Streaming:** TLS mutual authentication over Unix domain sockets or TCP.
-*   **📧 Multi-Channel Alerts:** Email (SMTP) and Telegram notifications on quarantine events.
+*   **📧 Multi-Channel Alerts:** Email (SMTP), Telegram, Discord, and Slack notifications on quarantine events.
 *   **📊 Structured Logging:** Go `slog` with lumberjack rotation.
 *   **🚀 Auto-Tuned System Limits:** Automatically optimizes file descriptor limits for heavy scans.
 *   **🌍 Cross-Platform:** Linux, macOS, Windows. No legacy bash dependencies.
@@ -50,7 +50,7 @@ graph TD
         Matcher_S -- "Detection Result" --> ActionHandler["Action Handler"]
         Matcher_L -- "Detection Result" --> ActionHandler
         
-        ActionHandler --> Notifier["Email / Telegram"]
+        ActionHandler --> Notifier["Email / Telegram / Discord / Slack"]
         ActionHandler --> Quarantine["Quarantine Manager"]
     end
 ```

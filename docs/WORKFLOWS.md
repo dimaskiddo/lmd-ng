@@ -15,6 +15,11 @@ flowchart TD
     Route -- "service" --> ServiceMgmt
     Route -- "quarantine" --> QuarantineMgmt
     Route -- "upgrade" --> UpgradeFlow
+    Route -- "status" --> StatusDisplay
+    Route -- "version" --> VersionDisplay
+
+    StatusDisplay[status] --> EndStatus([done])
+    VersionDisplay[version] --> EndVersion([done])
 
     subgraph S1["1. Boot"]
         Boot[load config] --> InitLog[init logger]
@@ -71,7 +76,7 @@ flowchart TD
 1. **Config:** `config.NewConfigManager()` — search binary dir → `/etc/lmd-ng/` → `/usr/local/etc/lmd-ng/` → `/usr/local/lmd-ng/`. Resolve all paths relative to binary's directory.
 2. **Logger:** `log.InitLogger()` — dual output (stdout + lumberjack file) when `output: "file"`.
 3. **Ensure dirs:** Create `logs/`, `sigs/`, `quarantine/`, `clamav/` (if enabled).
-4. **Build engines:** `buildEngines(cfg)` — always create `LMDSignatureScanner` (loads LMD native: MD5 + SHA256 + HEX, plus RFXN: HDB + MDB + NDB via `pkg/clamav`). Hash-based sub-scanners (MD5, SHA256, RFXN HDB, RFXN MDB) are always active. Heuristic sub-scanners (HEX, RFXN NDB) are gated by `enabled_heuristics` config. If `clamav_enabled: true`, also create `ClamAVSignatureEngine` (HDB + MDB always active; NDB gated by `enabled_heuristics`).
+4. **Build engines:** `buildEngines(cfg)` — always create `LMDSignatureScanner` (loads LMD native: MD5 + SHA256 + HEX, plus RFXN: HDB (MD5 + SHA1 + SHA256 file-hash lookup) + MDB + NDB via `pkg/clamav`). Hash-based sub-scanners (MD5, SHA256, RFXN HDB, RFXN MDB) are always active. Heuristic sub-scanners (HEX, RFXN NDB) are gated by `enabled_heuristics` config. If `clamav_enabled: true`, also create `ClamAVSignatureEngine` (HDB + MDB always active; NDB gated by `enabled_heuristics`).
 5. **Start DBS:** `dbs.NewServer(cfg, engines)` — set `EngineFactory` for hot-reload. `server.Serve(ctx)` enters accept loop.
 6. **SIGHUP goroutine:** `handleConfigReload()` — re-read YAML, swap config atomically. Triggers `EngineFactory` to rebuild engines.
 
@@ -90,7 +95,7 @@ flowchart TD
 
 **ClamAV databases** (when `clamav_update_enabled` + `clamav_enabled`):
 1. Uses `If-Modified-Since` header (304 if unchanged)
-2. Downloads each DB (`daily.cvd`, `bytecode.cvd`, `main.cvd`) independently
+2. Downloads each DB (`daily.cvd`, `main.cvd`, `bytecode.cvd`) independently
 3. User-Agent: `ClamAV/<version>` (fetched from GitHub releases API, fallback `1.5.2`)
 
 ### 3. File System Monitoring (`internal/monitor/`)
@@ -173,15 +178,19 @@ flowchart TD
 ```
 
 **Pass 1 details:**
-- Each engine's `Scan()` is hash-only: MD5, SHA256, RFXN HDB, RFXN MDB (LMDSignatureScanner); ClamAV HDB, ClamAV MDB (ClamAVSignatureEngine)
+- Each engine's `Scan()` is hash-only: MD5, SHA256, RFXN HDB (MD5 + SHA1 + SHA256), RFXN MDB (LMDSignatureScanner); ClamAV HDB, ClamAV MDB (ClamAVSignatureEngine)
 - Short-circuits on first detection across all engines
+- Engine errors are accumulated; if an engine errors, the next engine is tried
+- ClamAVSignatureEngine is only present in the engine list when `clamav_enabled: true`
 
 **Pass 2 details:**
 - Only runs if Pass 1 found no match
+- Each engine must implement `HeuristicScanner` interface — engines without it are skipped
 - Each engine's `ScanHeuristics()` is individually gated by `enabled_heuristics` config
 - LMDSignatureScanner: HEX patterns + RFXN NDB (if `"ndb"` enabled)
 - ClamAVSignatureEngine: ClamAV NDB (if `"ndb"` enabled)
 - Short-circuits on first detection across all engines
+- If all engines error, returns aggregated error via `errors.Join`
 
 ### 5. Detection & Quarantine
 
@@ -193,7 +202,7 @@ flowchart TD
 6. **Atomic move:** `os.Rename` to quarantine dir (fallback copy+delete for cross-device)
 7. **Lock:** `chmod 0o000`
 8. **Sidecar:** Write `.metadata.json` (permission `0o600`)
-9. **Notify:** `notifier.SendQuarantineNotification()` — Email + Telegram (checks internet connectivity first)
+9. **Notify:** `notifier.SendQuarantineNotification()` — Email + Telegram + Discord + Slack (all gated by `enabled` config flags, internet connectivity checked first)
 
 ### 6. Scheduled Scans
 
@@ -215,8 +224,8 @@ flowchart TD
 
 ### 8. Upgrade (`cmd/lmd-ng/upgrade.go`, `internal/upgrade/`)
 
-1. **Version check:** `Upgrader.LatestVersion(ctx)` → GitHub Releases API → returns `(tag, commitish)`
-2. **Compare:** If same version + same commit → exit (up-to-date). `--force` skips this.
+1. **Version check:** `Upgrader.LatestVersion(ctx)` → GitHub Releases API → returns `(tag, commitish)`. Commit SHA resolved from tag via Commits API, falls back to `target_commitish` if resolution fails.
+2. **Compare:** If same version + same commit → exit (up-to-date). If same version but different commit → upgrade (newer build). `--force` skips comparison entirely.
 3. **Download:** `Upgrader.DownloadRelease(ctx, tag, goos, goarch)` → download zip to temp file → extract lmd-ng binary
 4. **Detect services:** Check if `lmd-ng-dbs` / `lmd-ng-rtp` are installed
 5. **Stop services:** Stop RTP first (if installed), then DBS (if installed)
@@ -237,13 +246,13 @@ flowchart TD
 | Binary | `dist/` | `lmd-ng` |
 | LMD signatures | `<sigs_dir>/dat/` | `md5v2.dat`, `sha256v2.dat`, `hex.dat` |
 | RFXN signatures | `<sigs_dir>/rfxn/` | `rfxn.*` |
-| LMD version | `<sigs_dir>/` | `maldet.sigs.ver` |
-| ClamAV databases | `<clamav_dir>/` | `daily.cvd`, `bytecode.cvd`, `main.cvd` |
+| LMD version | `<sigs_dir>/` | Filename derived from `signature_version_url` (canonical name inside tarball: `maldet.sigs.ver`) |
+| ClamAV databases | `<clamav_dir>/` | `daily.cvd`, `main.cvd`, `bytecode.cvd` |
 | Quarantined file | `<quarantine_dir>/` | `<basename>.<32-char-hex>.quarantined` |
-| Quarantine metadata | `<quarantine_dir>/` | `<quarantined-path>.metadata.json` |
+| Quarantine metadata | `<quarantine_dir>/` | `<basename>.<32-char-hex>.quarantined.metadata.json` |
 | TLS certificates | `<base_path>/certs/` | `ca.crt`, `ca.key`, `server.crt`, `server.key`, `client.crt`, `client.key` (auto-generated) |
 | Log file | `<logs_dir>/` | `lmd-ng.log` |
-| Unix socket | `<base_path>/` | `lmd-ng.sock` |
+| Unix socket | Configurable via `server.socket_path` | Default: `<base_path>/lmd-ng.sock` |
 
 ---
 
@@ -252,10 +261,10 @@ flowchart TD
 | Scenario | Recovery |
 |---|---|
 | DBS unreachable from RTP | `WaitForServer` retries 30×2s, blocks startup until DBS online |
-| Connection dropped mid-scan | Client retry loop: 2 attempts, 1s delay after pool drain. Connection errors drain all pooled connections before retry with fresh dial. File-level errors not retried. Pooled connections health-checked before reuse, idle timeout 4 minutes. |
+| Connection dropped mid-scan | Client retry loop: 2 attempts, pool drain and fresh dial on connection errors. File-level errors not retried. Pooled connections health-checked before reuse, idle timeout 4 minutes. |
 | Lock file event (`.#` files) | Filtered at monitor layer — no stat, no scan. Zero noise |
 | Permission denied during walk | Log at Warn/Debug, `continue` to next file. Never abort scan |
-| Quarantine encryption fails | Log error, file remains unquarantined. Scan continues |
+| Quarantine encryption fails | Log error, file quarantined unencrypted (fallback to `moveFile`). Scan continues |
 | SIGHUP reload fails | Log error, old config remains active. Engines unaffected |
 | Signature download fails | Log error, existing signatures remain. Update skipped |
 | Internet offline (notifications) | `MultiNotifier` checks `HasInternetAccess()` before dispatch. Silently drops if offline |
@@ -264,3 +273,8 @@ flowchart TD
 | Upgrade download fails | Log error, exit 1. No binary modified |
 | Upgrade service stop fails | Log warning, continue. Binary still replaced |
 | Upgrade binary replace fails | Log error, exit 1. Old binary backed up as `.old` |
+| Engine creation failure at startup | `buildEngines()` returns error → `os.Exit(1)` |
+| ClamAV engine creation failure | Logged as warning, ClamAV engine skipped. Scan continues without ClamAV signatures |
+| DBS client creation failure for scan scheduler | `os.Exit(1)` — scan scheduler cannot function without DBS client |
+| All scan engines failing | `ScanDataWithEngines` returns aggregated error via `errors.Join`. Caller receives error and aborts |
+| SIGHUP context cancellation | `handleConfigReload` goroutine returns on `ctx.Done()`, stops listening for SIGHUP |

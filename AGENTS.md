@@ -31,8 +31,13 @@ Rewrite Linux Malware Detect (LMD/Maldet) from Bash into a modern Golang applica
 | **Updater** | Downloads LMD signature packs (.tar.gz) and ClamAV CVD databases; version checking, atomic writes |
 | **Quarantine** | AES-256-GCM encryption, POSIX metadata capture/restore, short-ID lookup |
 | **Protocol** | Custom binary wire protocol: `[1-byte type][4-byte length][payload]` over TLS |
-| **Notifier** | `Notifier` interface + MultiNotifier; Email (SMTP) and Telegram (Bot API) |
+| **Notifier** | `Notifier` interface + MultiNotifier; Email (SMTP), Telegram (Bot API), Discord (webhook), Slack (incoming webhook) |
 | **Service** | OS service install/uninstall via `kardianos/service` — `dbs` and `rtp` as separate services |
+| **Upgrade** | Binary self-upgrade — GitHub Releases API, platform-specific swap (Unix: atomic rename; Windows: batch trampoline) |
+| **Config** | Viper YAML config, path resolution, SIGHUP hot-reload |
+| **Log** | `log/slog` + lumberjack rotation, dual stdout+file output |
+| **Syslimits** | ulimit management (Unix) |
+| **Util** | Helpers (size parsing, symlink resolution, internet check, temp path detection) |
 
 ## Signature Types
 
@@ -155,22 +160,29 @@ lmd-ng/
 │   ├── upgrade/          # Binary self-upgrade (GitHub Releases API, platform-specific swap)
 │   ├── quarantine/       # AES-256-GCM quarantine, metadata capture
 │   ├── protocol/         # Binary wire protocol + TLS
-│   ├── notifier/         # Email + Telegram notifications
+│   ├── notifier/         # Email, Telegram, Discord, and Slack notifications
 │   ├── service/          # OS service management (kardianos/service)
 │   ├── log/              # slog wrapper + lumberjack rotation
-│   ├── util/             # Helpers (size parsing, internet check)
+│   ├── util/             # Helpers (size parsing, symlink resolution, internet check)
 │   └── syslimits/        # ulimit management (Unix)
 ├── pkg/clamav/           # Public ClamAV DB parser (pure Go)
 ├── docs/
 │   ├── ARCHITECTURE.md   # Module map, component internals, data flows
 │   └── WORKFLOWS.md      # Pipeline flow diagrams, operational sequences
 ├── hack/zcc.sh           # Zig C compiler wrapper
+├── hack/zcxx.sh          # Symlink to zcc.sh (C++ wrapper)
 ├── dist/                 # Build output (generated, not in repo)
 ├── config.yaml.example   # Full annotated config template
 ├── Makefile              # Build targets (build, release, docker-build, clean)
 ├── .goreleaser.yml       # Cross-platform release config
 ├── Dockerfile            # Multi-stage Go+Zig build
 ├── AGENTS.md             # Agent instructions (also via symlinks CLAUDE.md, GEMINI.md)
+├── README.md             # Project readme
+├── LICENSE               # License file
+├── go.mod                # Go module definition
+├── go.sum                # Dependency checksums
+├── .gitignore            # Git ignore rules
+├── .dockerignore         # Docker ignore (symlink → .gitignore)
 └── vendor/               # Go vendored dependencies
 ```
 

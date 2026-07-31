@@ -15,6 +15,7 @@ graph LR
         Update["update.go"]
         Upgrade["upgrade.go"]
         Status["status.go"]
+        Version["version.go"]
         Service["service.go"]
         Quarantine["quarantine.go"]
     end
@@ -111,9 +112,9 @@ sequenceDiagram
 | **Protocol** | `internal/protocol/` | Binary wire format over TLS (unix socket or TCP) |
 | **Quarantine** | `internal/quarantine/` | AES-256-GCM encrypt, POSIX metadata capture, short-ID lookup |
 | **Updater** | `internal/updater/` | Download LMD/ClamAV signatures, version check, atomic install |
-| **Upgrade** | `internal/upgrade/` | Binary self-upgrade — GitHub Releases API, zip/tgz extraction, platform-specific swap |
+| **Upgrade** | `internal/upgrade/` | Binary self-upgrade — GitHub Releases API, zip extraction, platform-specific swap |
 | **Scheduler** | `internal/scheduler/` | Cron-based update + scan scheduling |
-| **Notifier** | `internal/notifier/` | Email (SMTP) + Telegram on quarantine events |
+| **Notifier** | `internal/notifier/` | Email (SMTP), Telegram (Bot API), Discord (webhook), Slack (incoming webhook) on quarantine events |
 | **Service** | `internal/service/` | OS service install via `kardianos/service` |
 | **Config** | `internal/config/` | YAML via Viper, path resolution, SIGHUP hot-reload |
 | **Log** | `internal/log/` | `log/slog` + lumberjack rotation, dual stdout+file output |
@@ -138,7 +139,7 @@ Binary wire format: `[1-byte type][4-byte length BE][payload]`
 | 0x0A | `MsgStatusRequest` | client→server | Empty |
 | 0x0B | `MsgStatusResponse` | server→client | JSON-encoded `StatusData` |
 
-**Limits:** `MaxChunkSize` = 32KB, `MaxPayloadSize` = 1MB. TLS mandatory (`tls.VersionTLS13`, mutual auth).
+**Limits:** `MaxChunkSize` = 32KB, `MaxPayloadSize` = 1MB. TLS mandatory (`tls.VersionTLS13`, mutual auth). Auto-generated certs use ECDSA P-256.
 
 **Note:** `MsgReloadSignatures`/`MsgReloadAck` are used by `lmd-ng update` to notify a running DBS server to reload engines after signature download.
 
@@ -200,6 +201,12 @@ Single-pass hash computation (MD5+SHA1+SHA256 via `io.MultiWriter`) → HDB look
 **Pass 2 — `ScanHeuristics()` (pattern-based, gated by `enabled_heuristics: ["ndb"]`):**
 Reads first `clamav_hex_depth` bytes (default 64KB), runs NDB body-pattern matching. Only runs if no hash match was found in Pass 1 and `"ndb"` is in `enabled_heuristics`.
 
+| Sub-scanner | Source | Matching | Pass | Gated By |
+|---|---|---|---|---|
+| **ClamAV HDB** | ClamAV CVD via `pkg/clamav` | File-size-gated MD5/SHA1/SHA256 hash lookup | 1 (Scan) | `clamav_enabled` |
+| **ClamAV MDB** | ClamAV CVD via `pkg/clamav` | PE section hash lookup (PE files only) | 1 (Scan) | `clamav_enabled` |
+| **ClamAV NDB** | ClamAV CVD via `pkg/clamav` | Body hex patterns (depth `clamav_hex_depth`) | 2 (ScanHeuristics) | `clamav_enabled` + `enabled_heuristics: ["ndb"]` |
+
 ### Walker (`internal/scanner/walker.go`)
 
 Filter pipeline applied per file:
@@ -242,9 +249,13 @@ flowchart LR
 | `DetectionInfo` | Signature name that matched |
 | `DetectionEngine` | Engine that detected (LMD/ClamAV) |
 | `FileMode` | Full permission bits (including setuid/setgid/sticky) |
+| `FileModeStr` | Human-readable mode string (e.g. `-rwsr-xr-x`) |
 | `UID/GID` | Owner/group (Unix only; Windows: 0) |
+| `Username` | Resolved username (best-effort lookup) |
+| `GroupName` | Resolved group name (best-effort lookup) |
 | `ModTime` | Original modification time |
 | `FileSize` | Original file size |
+| `QuarantinedAt` | Timestamp of when the file was quarantined |
 | `EncryptionKey` | Encrypted AES file key (master key = SHA-256 of config password) |
 | `Nonce` | AES-GCM nonce used for file encryption (random 12 bytes per file) |
 
@@ -272,7 +283,7 @@ Minimum 4 characters. Scans `*.quarantined` files, extracts hex ID after last `.
 | `scanner` | Signature path, clamav toggle, file size/depth filters, symlink recursion depth, CPU limits, owner/regex filters |
 | `scheduler` | Update interval (cron), scan interval (cron) |
 | `updater` | Auto-update, LMD URLs, ClamAV mirror/databases, binary auto-upgrade, release API |
-| `notification` | Email (SMTP) + Telegram (Bot API) |
+| `notification` | Email (SMTP), Telegram (Bot API), Discord (webhook), Slack (incoming webhook) |
 
 ### Search Order
 
@@ -296,6 +307,8 @@ Triggered on: **quarantine events only** (file detected + encrypted + moved).
 |---|---|
 | **Email** | HTML email via SMTP. Subject: `[LMD-NG Alert] Malware Quarantined on <hostname>`. Two modes: direct TLS (port 465) or STARTTLS + `PlainAuth`. |
 | **Telegram** | POST to `api.telegram.org/bot<token>/sendMessage`. HTML-formatted message with host, time, file path, signature name. |
+| **Discord** | POST to webhook URL. Rich embed with red alert color, structured fields (host, time, file path, signature), footer, timestamp. |
+| **Slack** | POST to incoming webhook URL. Block Kit layout with header, dividers, 2-column section fields, context footer. |
 
 `MultiNotifier` checks internet connectivity before dispatch. Silently drops if offline. Aggregates errors from all providers.
 
@@ -334,7 +347,7 @@ Platform-aware self-upgrade via GitHub Releases API.
 flowchart LR
     A["Query GitHub<br>Releases API"] --> B{"Version<br>changed?"}
     B -- No --> C["Exit<br>(up-to-date)"]
-    B -->|"Yes / --force"| D["Download<br>zip/tgz archive"]
+    B -->|"Yes / --force"| D["Download<br>zip archive"]
     D --> E["Extract<br>lmd-ng binary"]
     E --> F{"OS?"}
     F -- Unix --> G["Atomic inode<br>swap (rename)"]
@@ -348,6 +361,7 @@ flowchart LR
 | Component | Location | Role |
 |---|---|---|
 | `Upgrader` | `internal/upgrade/upgrade.go` | GitHub API client, download, archive extraction |
+| `copyFile` | `internal/upgrade/copy.go` | Shared cross-platform file copy (Unix fallback, Windows binary copy) |
 | `ReplaceBinary` (Unix) | `internal/upgrade/upgrade_unix.go` | Atomic `os.Rename` with cross-device fallback |
 | `ReplaceBinary` (Windows) | `internal/upgrade/upgrade_windows.go` | Batch trampoline: copy → wait → move → restart services → self-delete |
 | CLI command | `cmd/lmd-ng/upgrade.go` | `lmd-ng upgrade [--force]` — orchestrates full upgrade flow |
