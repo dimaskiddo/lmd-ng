@@ -148,7 +148,7 @@ func (u *Upgrader) DownloadRelease(ctx context.Context, version, goos, goarch st
 
 	// Build asset filename using goreleaser naming conventions
 	assetName := buildAssetName(version, goos, goarch)
-	downloadURL := buildDownloadURL(version, assetName)
+	downloadURL := buildDownloadURL(version, assetName+".zip")
 
 	// Download to temp file
 	tmpFile, err := os.CreateTemp(tmpDir, "lmd-upgrade-*.zip")
@@ -247,10 +247,11 @@ func buildAssetName(version, goos, goarch string) string {
 	return fmt.Sprintf("lmd-ng_%s_%s_%s", ver, archiveOS, archiveArch)
 }
 
-// buildDownloadURL constructs the GitHub release download URL.
-func buildDownloadURL(version, assetName string) string {
+// buildDownloadURL constructs the GitHub release download URL for a full asset
+// filename (caller supplies any extension, e.g. ".zip" or ".txt").
+func buildDownloadURL(version, filename string) string {
 	// version already includes 'v' prefix (from LatestVersion)
-	return fmt.Sprintf("https://github.com/dimaskiddo/lmd-ng/releases/download/%s/%s.zip", version, assetName)
+	return fmt.Sprintf("https://github.com/dimaskiddo/lmd-ng/releases/download/%s/%s", version, filename)
 }
 
 // downloadText fetches a small remote file (e.g. checksums.txt) and returns
