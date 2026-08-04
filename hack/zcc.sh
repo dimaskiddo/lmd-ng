@@ -35,8 +35,18 @@ fi
 
 # Check of build for MacOS, since it need it's own SDK
 if [[ $GOOS == "darwin" ]]; then
-  # Check for MacOS SDK files if already exist
-  if [[ ! -d $ZIG_MACOS_SDK_FILE_PATH ]]; then
+  # Whether the SDK cache is complete enough to build against (has the headers
+  # required by the CGO dependencies: CoreServices umbrella + sys/stat.h).
+  sdk_is_valid() {
+    [[ -f $ZIG_MACOS_SDK_FILE_PATH/System/Library/Frameworks/CoreServices.framework/Headers/CoreServices.h ]] \
+      && [[ -f $ZIG_MACOS_SDK_FILE_PATH/usr/include/sys/stat.h ]]
+  }
+
+  # Check for MacOS SDK files if not already present AND valid. A hollow or
+  # partial extraction (dirs present but headers missing) is treated as absent
+  # so it is re-downloaded rather than reusing a broken cache.
+  if ! sdk_is_valid; then
+    rm -rf $ZIG_MACOS_SDK_FILE_PATH
     echo "`date` - Downloading MacOS $ZIG_MACOS_SDK_VERSION SDK file..."
 
     curl -sS -o /tmp/MacOSX.sdk.tar.xz -L $ZIG_MACOS_SDK_FILE_URL
@@ -44,6 +54,13 @@ if [[ $GOOS == "darwin" ]]; then
     rm -f /tmp/MacOSX.sdk.tar.xz
 
     mv /tmp/MacOSX${ZIG_MACOS_SDK_VERSION}.sdk $ZIG_MACOS_SDK_FILE_PATH
+
+    # Fail early with a clear message if the extracted SDK is still hollow,
+    # instead of surfacing an opaque "CoreServices.h not found" later.
+    if ! sdk_is_valid; then
+      echo "`date` - ERROR! MacOS SDK extraction is incomplete: missing CoreServices.h or sys/stat.h under $ZIG_MACOS_SDK_FILE_PATH"
+      exit 1
+    fi
   fi
 fi
 
