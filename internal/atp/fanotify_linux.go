@@ -68,9 +68,7 @@ func waitUntilShutdown(ctx context.Context, control <-chan string) {
 }
 
 // startMonitor runs the fanotify notification-event loop until ctx is cancelled
-// or a shutdown command is received. FAN_CLASS_NOTIF never blocks openers — the
-// kernel delivers open notifications and proceeds immediately. Immutable flags
-// (chattr +i) remain the enforcement layer.
+// or a shutdown command is received.
 func (p *Protector) startMonitor(ctx context.Context, files []string, control <-chan string) {
 	go p.startInotifyMonitor(ctx, files)
 

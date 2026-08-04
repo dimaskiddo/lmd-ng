@@ -456,7 +456,11 @@ Runs standalone or alongside DBS and RTP as part of 'lmd-ng daemon'.`,
 			controlCh, err := protector.Protect(ctx)
 			if err != nil {
 				log.Error("ATP: failed to start protection", "error", err)
-				os.Exit(1)
+				// Fall through — keep the daemon alive so systemd can act on
+				// the logged error (restart policy). Protection goroutines
+				// continue to monitor even without immutable flags.
+				<-ctx.Done()
+				return
 			}
 
 			log.Info("LMD-NG ATP (Anti-Tamper Protection) started")

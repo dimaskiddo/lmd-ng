@@ -57,9 +57,7 @@ func (p *Protector) Protect(ctx context.Context) (chan string, error) {
 	}
 	p.files = files
 
-	// Clear stale immutable flags from a previous crashed session before
-	// applying fresh protection. Non-fatal: flags may not exist or the
-	// filesystem may not support them.
+	// Re-apply protection idempotently; stale flags from a prior run are cleared first.
 	if err := p.removeProtection(files); err != nil {
 		log.Warn("ATP: failed to clear stale protection flags", "error", err)
 	}

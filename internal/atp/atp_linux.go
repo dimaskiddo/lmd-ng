@@ -3,9 +3,9 @@
 package atp
 
 import (
-	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"unsafe"
 
 	"github.com/dimaskiddo/lmd-ng/internal/log"
@@ -15,24 +15,55 @@ import (
 // ext2IMMUTABLEFL is the FS_IMMUTABLE_FL inode flag (`chattr +i`).
 const ext2IMMUTABLEFL = 0x00000010
 
+// isContainer reports whether the process runs inside a container (LXC, Docker,
+// Podman, Kubernetes, systemd-nspawn). Containers lack CAP_LINUX_IMMUTABLE, so
+// immutable flags will always fail with EPERM there — an expected constraint.
+func isContainer() bool {
+	// On a host PID 1's cgroup is /init.scope or /system.slice/...; containers
+	// nest it under the runtime path (e.g. /lxc/..., /docker/..., /kubepods/...).
+	if data, err := os.ReadFile("/proc/1/cgroup"); err == nil {
+		content := string(data)
+		for _, marker := range []string{
+			"/lxc/", "/lxc.", "/docker/", "/docker-",
+			"/libpod/", "/libpod-", "/kubepods/",
+			"/machine.slice/machine-",
+		} {
+			if strings.Contains(content, marker) {
+				return true
+			}
+		}
+	}
+	// LXC, systemd-nspawn, and some runtimes set container= in PID 1's env.
+	if env, err := os.ReadFile("/proc/1/environ"); err == nil {
+		if strings.Contains(string(env), "container=") {
+			return true
+		}
+	}
+	return false
+}
+
 // applyProtection sets the immutable flag on every protected file.
 func (p *Protector) applyProtection(files []string) error {
-	var errs []error
+	var failed int
 	for _, f := range files {
 		if err := setImmutable(f); err != nil {
 			if os.IsNotExist(err) {
 				log.Debug("ATP: skipping non-existent file", "file", f)
 				continue
 			}
-			log.Warn("ATP: cannot set immutable flag (unsupported filesystem?)",
-				"file", f, "error", err)
-			errs = append(errs, err)
+			failed++
 		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("failed to protect %d files: %w", len(errs), errors.Join(errs...))
+	if failed == 0 {
+		return nil
 	}
-	return nil
+	if isContainer() {
+		log.Info("ATP: immutable flags unavailable (container without CAP_LINUX_IMMUTABLE) — "+
+			"continuing with monitoring only",
+			"failed", failed)
+		return nil
+	}
+	return fmt.Errorf("failed to protect %d files", failed)
 }
 
 // removeProtection clears the immutable flag on all protected files.
