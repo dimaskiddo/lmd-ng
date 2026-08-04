@@ -74,6 +74,26 @@ flowchart TD
 
 ### 1. Startup (`cmd/lmd-ng/main.go`, `cmd/lmd-ng/daemon.go`)
 
+```mermaid
+sequenceDiagram
+    participant Daemon as Daemon
+    participant ATP
+    participant FS as File System
+    participant DBS
+    participant RTP
+
+    Daemon->>ATP: Protect(ctx)
+    ATP->>FS: lock critical files (immutable/deny)
+    ATP-->>Daemon: control channel
+    Daemon->>DBS: Serve(ctx)
+    Daemon->>RTP: Start(ctx)
+    Note over ATP,FS: monitor + re-apply on tamper
+    Daemon->>RTP: Stop()
+    Daemon->>DBS: Shutdown()
+    Daemon->>ATP: "shutdown"
+    ATP->>FS: release locks (last)
+```
+
 0. **Dependency check (service mode only):** When a component starts as an OS service (`daemon <comp> --service`), it verifies its required services are running before proceeding — DBS requires ATP, RTP requires ATP+DBS. Fails with an error (and the service manager marks it failed) if a dependency is not running.
 1. **ATP:** `atp.NewProtector(cfg)` — lock critical files before any other service touches them.
    - Linux: set the immutable inode flag, start the fanotify deny listener + inotify tamper monitor.
@@ -245,6 +265,18 @@ flowchart TD
    - **Windows:** Copy new binary as `lmd-ng.exe.new`, write `upgrade-finalize.bat` trampoline (waits 2s, moves new over old, starts services, self-deletes)
 9. **Reinstall services:** Reinstall ATP, DBS, RTP (dependency order) with explicit config + per-component default log paths baked into service arguments
 10. **Start services:** Start ATP first, then DBS, then RTP (after 1s delay)
+
+---
+
+### 9. Quarantine Management (`cmd/lmd-ng/quarantine.go`, `internal/quarantine/`)
+
+Manual quarantine lifecycle via CLI:
+
+1. **List:** `quarantine list` → `qm.List(ctx)` → returns entries (ID, original path, detection, mode, owner, timestamps).
+2. **Add:** `quarantine add <file>` → `qm.Quarantine(ctx, file, ...)` → move + encrypt + capture metadata + lock.
+3. **Restore:** `quarantine restore <id|path>` → `qm.Restore(ctx, qp)` → decrypt → atomic move to original path → restore POSIX attrs → remove quarantine entry.
+4. **Export:** `quarantine restore <id|path> --to <path>` → `qm.ExportTo(ctx, qp, dest)` → decrypt to custom path → write `.original-path.txt` note → **keep** the quarantine entry (evidence preserved).
+5. **Remove:** `quarantine remove <id|path> --force` → `qm.Remove(ctx, qp)` → permanently delete the entry and its metadata.
 
 ---
 

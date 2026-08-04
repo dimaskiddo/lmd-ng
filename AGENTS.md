@@ -75,7 +75,7 @@ lmd-ng [--config <path>]
   quarantine
     list                  # List quarantined files
     add <file>            # Manually quarantine
-    restore <id|path>     # Restore quarantined file
+    restore <id|path> [--to P]  # Restore to original path, or export to custom path (--to) keeping evidence
     remove <id|path>      # Permanently delete (requires --force)
   version
 ```

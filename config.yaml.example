@@ -38,6 +38,8 @@ quarantine:
   path: "./quarantine"
   enable_encryption: true
   encryption_key: "CHANGE-THIS-TO-YOUR-SECRET-KEY"
+  # Max file size to quarantine. Larger files are refused (ErrFileTooLarge) and
+  # not quarantined; enforced in Quarantine/Restore/ExportTo. Default: 20M.
   max_file_size: "20M"
 
 monitor:

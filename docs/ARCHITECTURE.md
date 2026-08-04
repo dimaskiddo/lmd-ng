@@ -151,9 +151,39 @@ Binary wire format: `[1-byte type][4-byte length BE][payload]`
 
 ---
 
-## 2.5. ATP — Anti-Tamper Protection (`internal/atp/`)
+## 3. ATP — Anti-Tamper Protection (`internal/atp/`)
 
 Prevents malware from modifying or deleting LMD-NG's own files (binary, config, signatures, TLS certs, quarantine).
+
+```mermaid
+sequenceDiagram
+    participant Daemon as Daemon (cmd/lmd-ng)
+    participant ATP
+    participant FS as File System
+    participant DBS as DBS Server
+    participant RTP as RTP Client
+
+    Note over Daemon,ATP: STARTUP — ATP locks files first
+    Daemon->>ATP: NewProtector(cfg)
+    Daemon->>ATP: Protect(ctx)
+    ATP->>FS: applyProtection(files) (immutable/deny)
+    ATP-->>Daemon: control channel (unlock/lock/shutdown)
+
+    Note over DBS,RTP: DBS/RTP start only after files are locked
+    Daemon->>DBS: Serve(ctx)
+    Daemon->>RTP: Start(ctx)
+
+    Note over ATP,FS: RUNTIME — monitor + detect + re-apply
+    ATP->>FS: fanotify / inotify / recheck
+    FS-->>ATP: tamper event (write/attr/rename)
+    ATP->>ATP: re-apply protection / alert
+
+    Note over Daemon,ATP: SHUTDOWN — ATP releases LAST
+    Daemon->>RTP: Stop()
+    Daemon->>DBS: Shutdown()
+    Daemon->>ATP: control "shutdown"
+    ATP->>FS: removeProtection(files)
+```
 
 ### Startup Order
 
@@ -177,7 +207,7 @@ ATP is always-on — no config toggles. Protected files are auto-derived: binary
 
 ---
 
-## 3. Scanner (`internal/scanner/`)
+## 4. Scanner (`internal/scanner/`)
 
 ### SignatureEngine Interface
 
@@ -257,7 +287,7 @@ Platform-specific: `walker_unix.go` (`applyOwnerFilters` — UID/GID), `walker_w
 
 ---
 
-## 4. Quarantine (`internal/quarantine/quarantine.go`)
+## 5. Quarantine (`internal/quarantine/quarantine.go`)
 
 ### Flow
 
@@ -291,9 +321,12 @@ flowchart LR
 | `EncryptionKey` | Encrypted AES file key (master key = SHA-256 of config password) |
 | `Nonce` | AES-GCM nonce used for file encryption (random 12 bytes per file) |
 
-### Restore Flow
+### Restore & Export Flow
 
-Read metadata → `chmod 0o400` to open → decrypt (if encrypted) → atomic move to original path → restore POSIX attributes (mode → ownership → mtime) → delete quarantine file + sidecar.
+Two modes are supported by `quarantine restore <id|path>`:
+
+- **Full restore** (default): read metadata → `chmod 0o400` to open → decrypt (if encrypted) → atomic move to the **original** path → restore POSIX attributes (mode → ownership → mtime) → **delete** the quarantine file + sidecar.
+- **Export** (`--to <path>`): decrypt to a custom path for analysis → restore POSIX attributes → write a `.original-path.txt` sidecar recording the original path → **keep** the quarantine entry (evidence preserved). Used when the sample must be pulled out into a sandbox or analysis directory without losing where it came from.
 
 ### Short-ID Lookup
 
@@ -301,7 +334,7 @@ Minimum 4 characters. Scans `*.quarantined` files, extracts hex ID after last `.
 
 ---
 
-## 5. Configuration (`internal/config/`)
+## 6. Configuration (`internal/config/`)
 
 ### Config Sections
 
@@ -309,13 +342,15 @@ Minimum 4 characters. Scans `*.quarantined` files, extracts hex ID after last `.
 |---|---|
 | `app` | Base paths: signatures, clamav, quarantine, logs |
 | `logging` | Level, output mode, file path, lumberjack rotation |
-| `server` | Network (unix/tcp), socket/address, connection pool, TLS |
-| `quarantine` | Enabled, path, encryption key |
+| `server` | Network (unix/tcp), socket path/address, backlog, connection pool, stream buffer limit, TLS |
+| `quarantine` | Enabled, path, encryption toggle + key, `max_file_size` (default `20M`) |
 | `monitor` | Watch paths, exclude dirs (auto-appended: sigs, clamav, quarantine, logs) |
-| `scanner` | Signature path, clamav toggle, file size/depth filters, symlink recursion depth, CPU limits, owner/regex filters |
+| `scanner` | Signature path, ClamAV toggle + DB path + hex depth, file size/depth filters, max symlink depth, hex depth, CPU/concurrency limits, owner/regex filters, hash allowlist, scan-ignore patterns, enabled heuristics |
 | `scheduler` | Update interval (cron), scan interval (cron) |
-| `updater` | Auto-update, LMD URLs, ClamAV mirror/databases, binary auto-upgrade, release API |
+| `updater` | Auto-update, LMD URLs + checksum, ClamAV mirror/databases, binary auto-upgrade, release API |
 | `notification` | Email (SMTP), Telegram (Bot API), Discord (webhook), Slack (incoming webhook) |
+
+Files larger than `quarantine.max_file_size` are refused with `ErrFileTooLarge` and are **not** quarantined; the limit is enforced in `Quarantine()`, `Restore()`, and `ExportTo()`.
 
 ### Search Order
 
@@ -331,7 +366,7 @@ Daemon spawns goroutine listening for `syscall.SIGHUP`. On signal: re-read YAML 
 
 ---
 
-## 6. Notification (`internal/notifier/`)
+## 7. Notification (`internal/notifier/`)
 
 Triggered on: **quarantine events only** (file detected + encrypted + moved).
 
@@ -346,7 +381,7 @@ Triggered on: **quarantine events only** (file detected + encrypted + moved).
 
 ---
 
-## 7. Service (`internal/service/`)
+## 8. Service (`internal/service/`)
 
 ### Components
 
@@ -376,7 +411,7 @@ The config path and the component's default log file path are baked into the ser
 
 ---
 
-## 8. Upgrade (`internal/upgrade/`)
+## 9. Upgrade (`internal/upgrade/`)
 
 Platform-aware self-upgrade via GitHub Releases API.
 
@@ -438,7 +473,7 @@ flowchart LR
 
 ---
 
-## 9. Cross-Platform Concerns
+## 10. Cross-Platform Concerns
 
 | Concern | Solution |
 |---|---|
@@ -451,7 +486,7 @@ flowchart LR
 
 ---
 
-## 10. Key Design Decisions
+## 11. Key Design Decisions
 
 1. **No `os/exec` in core** — file traversal via `filepath.WalkDir`, monitoring via `fsnotify`/`fsevents`, signatures via Go `crypto` + `pkg/clamav`
 2. **DBS/RTP split** — signature engine runs as server, monitor as client. Enables multi-host deployments, shared signature database

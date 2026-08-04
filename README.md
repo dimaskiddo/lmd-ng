@@ -12,7 +12,7 @@ A centralized **Database Signature Service (DBS)** loads signature databases int
 *   **🕵️ Real-Time Protection:** Native file system monitoring—**FSEvents** on macOS (via CGO/Zig) and **fsnotify** on Linux/Windows.
 *   **🔍 On-Demand Scanning:** Manual scans of any directory. Scan CLI acts as a DBS client for centralized, in-memory signatures.
 *   **🔄 Intelligent Updates:** Automated signature updates with hot-reload—DBS stays current without restarting active scans.
-*   **⬆️ Self-Upgrade:** One-command binary upgrade from GitHub releases. Downloads, stops services, replaces binary, restarts. Linux/macOS: atomic inode swap. Windows: batch trampoline for locked `.exe`.
+*   **⬆️ Self-Upgrade:** One-command binary upgrade from GitHub releases. Downloads, stops services, replaces the binary, restarts — with automatic checksum verification.
 *   **📊 Status Dashboard:** `lmd-ng status` shows DBS reachability, engine signature counts (MD5, SHA256, HEX, RFXN, ClamAV HDB/NDB/MDB), CVD database versions, quarantine count, RTP paths, and scheduler config.
 *   **📦 Native ClamAV Loader:** Pure Go support for ClamAV databases (`.cvd`, `.cld`, `.ndb`, `.hdb`, `.mdb`). No `libclamav` or `os/exec` dependencies.
 *   **📥 Secure Quarantine:** AES-256-GCM encryption, POSIX attribute preservation, short-ID lookup.
@@ -59,29 +59,18 @@ graph TD
 
 ## ⚠️ Upgrading
 
-> **Quarantine encryption format changed (after v0.2.0) — breaking for files quarantined with encryption enabled.**
->
-> Quarantined files created with `enable_encryption: true` on versions after v0.2.0 use a
-> broken encryption format (nonce reuse across 4KB chunks). Files larger than 4KB were
-> never correctly encrypted and **cannot be restored**. Files smaller than 4KB may appear
-> to decrypt but their authentication tags are invalid.
->
-> **Before upgrading**, check your quarantined files. If you are not sure which files
-> were affected, you can try restoring them first:
+> **Quarantine encryption format changed after v0.2.0.** Files quarantined with
+> encryption enabled on affected versions used a broken format and **cannot be
+> successfully restored**. Before upgrading, check your quarantined files and try
+> restoring them; if restoration fails, remove the affected entries:
 >
 > ```sh
 > lmd-ng quarantine list
-> lmd-ng quarantine restore <id>
-> ```
->
-> If restoration fails or you want to clean up, remove the affected files:
->
-> ```sh
+> lmd-ng quarantine restore <id>        # or:
 > lmd-ng quarantine remove --force <id>
 > ```
 >
-> **Unencrypted quarantine files are unaffected** — they were never encrypted and can be
-> restored normally after upgrading.
+> **Unencrypted quarantine files are unaffected** and restore normally after upgrading.
 
 ---
 
@@ -193,7 +182,8 @@ Each daemon component writes to its **own log file** (default `<logs_dir>/lmd-ng
 ### 📥 Quarantine Management
 *   **`lmd-ng quarantine list`**: List all quarantined files.
 *   **`lmd-ng quarantine add <file>`**: Manually move a suspicious file into quarantine.
-*   **`lmd-ng quarantine restore <id|path>`**: Safely restore a file to its original location with full attribute preservation.
+*   **`lmd-ng quarantine restore <id|path>`**: Restore a file to its original location with full attribute preservation.
+*   **`lmd-ng quarantine restore <id|path> --to <path>`**: Export the file to a custom path for analysis. The file **remains in quarantine** (evidence preserved); the original path is recorded in `<path>.original-path.txt`.
 *   **`lmd-ng quarantine remove <id|path>`**: Permanently delete a threat (requires `--force`).
 
 ### 📁 Log Files
