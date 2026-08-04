@@ -74,6 +74,7 @@ flowchart TD
 
 ### 1. Startup (`cmd/lmd-ng/main.go`, `cmd/lmd-ng/daemon.go`)
 
+0. **Dependency check (service mode only):** When a component starts as an OS service (`daemon <comp> --service`), it verifies its required services are running before proceeding — DBS requires ATP, RTP requires ATP+DBS. Fails with an error (and the service manager marks it failed) if a dependency is not running.
 1. **ATP:** `atp.NewProtector(cfg)` — lock critical files before any other service touches them.
    - Linux: set FS_IMMUTABLE_FL on all protected files, start fanotify FAN_DENY permission listener + inotify tamper detection monitor.
    - macOS: set SF_IMMUTABLE on all protected files, start periodic recheck.
@@ -235,13 +236,15 @@ flowchart TD
 1. **Version check:** `Upgrader.LatestVersion(ctx)` → GitHub Releases API → returns `(tag, commitish)`. Commit SHA resolved from tag via Commits API, falls back to `target_commitish` if resolution fails.
 2. **Compare:** If same version + same commit → exit (up-to-date). If same version but different commit → upgrade (newer build). `--force` skips comparison entirely.
 3. **Download:** `Upgrader.DownloadRelease(ctx, tag, goos, goarch)` → download zip to temp file → extract lmd-ng binary
-4. **Detect services:** Check if `lmd-ng-dbs` / `lmd-ng-rtp` are installed
-5. **Stop services:** Stop RTP first (if installed), then DBS (if installed)
+4. **Detect services:** Check if `lmd-ng-atp` / `lmd-ng-dbs` / `lmd-ng-rtp` are installed
+5. **Stop services:** Stop RTP first, then DBS, then ATP (reverse dependency order, releasing file locks last)
 6. **Wait:** 1 second for services to fully exit
-7. **Replace binary:** Platform-specific:
+7. **Uninstall services:** Remove RTP, DBS, ATP (reverse dependency order) so definitions match the new binary
+8. **Replace binary:** Platform-specific:
    - **Unix:** `os.Rename` old → `lmd-ng.old`, then `os.Rename` new → `lmd-ng`, `chmod 0755`. Cross-device fallback: `copyFile`
    - **Windows:** Copy new binary as `lmd-ng.exe.new`, write `upgrade-finalize.bat` trampoline (waits 2s, moves new over old, starts services, self-deletes)
-8. **Restart services:** Start DBS first (if installed), then RTP (after 1s delay)
+9. **Reinstall services:** Reinstall ATP, DBS, RTP (dependency order) with explicit config + per-component default log paths baked into service arguments
+10. **Start services:** Start ATP first, then DBS, then RTP (after 1s delay)
 
 ---
 
@@ -269,6 +272,7 @@ flowchart TD
 | Scenario | Recovery |
 |---|---|
 | DBS unreachable from RTP | `WaitForServer` retries 30×2s, blocks startup until DBS online |
+| Service dependency missing (DBS without ATP, RTP without ATP/DBS) | Only enforced in `--service` mode; component logs error and exits non-zero so the service manager marks it failed |
 | Connection dropped mid-scan | Client retry loop: 2 attempts, pool drain and fresh dial on connection errors. File-level errors not retried. Pooled connections health-checked before reuse, idle timeout 4 minutes. |
 | Lock file event (`.#` files) | Filtered at monitor layer — no stat, no scan. Zero noise |
 | Permission denied during walk | Log at Warn/Debug, `continue` to next file. Never abort scan |

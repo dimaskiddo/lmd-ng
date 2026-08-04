@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 
+	kservice "github.com/kardianos/service"
 	"github.com/spf13/cobra"
 
 	"github.com/dimaskiddo/lmd-ng/internal/atp"
@@ -18,6 +20,7 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/rtp"
 	"github.com/dimaskiddo/lmd-ng/internal/scanner"
 	"github.com/dimaskiddo/lmd-ng/internal/scheduler"
+	"github.com/dimaskiddo/lmd-ng/internal/service"
 	"github.com/dimaskiddo/lmd-ng/internal/updater"
 )
 
@@ -60,6 +63,13 @@ Subcommands:
 			defer stop()
 
 			cfg := cfgMgr.GetConfig()
+
+			// Combined daemon uses the configured log path unless overridden.
+			lp, _ := cmd.Flags().GetString("log-file")
+			if lp == "" {
+				lp = cfg.Logging.FilePath
+			}
+			log.InitLoggerWithPath(lp, logConfig(cfg.Logging))
 
 			var wg sync.WaitGroup
 
@@ -192,6 +202,8 @@ Subcommands:
 		},
 	}
 
+	cmd.Flags().String("log-file", "", "Log file path (default: config logging.filepath)")
+
 	cmd.AddCommand(dbsCmd())
 	cmd.AddCommand(rtpCmd())
 	cmd.AddCommand(atpCmd())
@@ -200,7 +212,7 @@ Subcommands:
 }
 
 func dbsCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "dbs",
 		Short: "Start the Database Signature Service (server)",
 		Long: `Start the centralized Database Signature Service (DBS).
@@ -213,6 +225,21 @@ Signature reload is triggered via socket command from 'lmd-ng update'.`,
 			defer stop()
 
 			cfg := cfgMgr.GetConfig()
+
+			// DBS uses its own log file (default <logs_dir>/lmd-ng-dbs.log).
+			lp, _ := cmd.Flags().GetString("log-file")
+			if lp == "" {
+				lp = defaultLogFile(cfg, "dbs")
+			}
+			log.InitLoggerWithPath(lp, logConfig(cfg.Logging))
+
+			// When run as an OS service, fail if ATP is not running.
+			if svcMode, _ := cmd.Flags().GetBool("service"); svcMode {
+				if err := verifyDependencies(cfg, service.ComponentDBS); err != nil {
+					log.Error("DBS dependency check failed", "error", err)
+					os.Exit(1)
+				}
+			}
 
 			var wg sync.WaitGroup
 
@@ -268,10 +295,15 @@ Signature reload is triggered via socket command from 'lmd-ng update'.`,
 			wg.Wait()
 		},
 	}
+
+	cmd.Flags().String("log-file", "", "Log file path (default: <logs_dir>/lmd-ng-dbs.log)")
+	cmd.Flags().Bool("service", false, "Running as OS service (internal)")
+
+	return cmd
 }
 
 func rtpCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "rtp",
 		Short: "Start the Real-Time Protector (client)",
 		Long: `Start the Real-Time Protector (RTP) client service.
@@ -284,6 +316,21 @@ quarantine locally. The DBS server must be running before starting RTP.`,
 			defer stop()
 
 			cfg := cfgMgr.GetConfig()
+
+			// RTP uses its own log file (default <logs_dir>/lmd-ng-rtp.log).
+			lp, _ := cmd.Flags().GetString("log-file")
+			if lp == "" {
+				lp = defaultLogFile(cfg, "rtp")
+			}
+			log.InitLoggerWithPath(lp, logConfig(cfg.Logging))
+
+			// When run as an OS service, fail if ATP or DBS is not running.
+			if svcMode, _ := cmd.Flags().GetBool("service"); svcMode {
+				if err := verifyDependencies(cfg, service.ComponentRTP); err != nil {
+					log.Error("RTP dependency check failed", "error", err)
+					os.Exit(1)
+				}
+			}
 
 			var wg sync.WaitGroup
 
@@ -355,10 +402,15 @@ quarantine locally. The DBS server must be running before starting RTP.`,
 			wg.Wait()
 		},
 	}
+
+	cmd.Flags().String("log-file", "", "Log file path (default: <logs_dir>/lmd-ng-rtp.log)")
+	cmd.Flags().Bool("service", false, "Running as OS service (internal)")
+
+	return cmd
 }
 
 func atpCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "atp",
 		Short: "Start the Anti-Tamper Protection daemon",
 		Long: `Start the Anti-Tamper Protection (ATP) daemon.
@@ -372,6 +424,21 @@ Runs standalone or alongside DBS and RTP as part of 'lmd-ng daemon'.`,
 			defer stop()
 
 			cfg := cfgMgr.GetConfig()
+
+			// ATP uses its own log file (default <logs_dir>/lmd-ng-atp.log).
+			lp, _ := cmd.Flags().GetString("log-file")
+			if lp == "" {
+				lp = defaultLogFile(cfg, "atp")
+			}
+			log.InitLoggerWithPath(lp, logConfig(cfg.Logging))
+
+			// When run as an OS service, verify ATP (no dependencies).
+			if svcMode, _ := cmd.Flags().GetBool("service"); svcMode {
+				if err := verifyDependencies(cfg, service.ComponentATP); err != nil {
+					log.Error("ATP dependency check failed", "error", err)
+					os.Exit(1)
+				}
+			}
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -399,6 +466,56 @@ Runs standalone or alongside DBS and RTP as part of 'lmd-ng daemon'.`,
 			}
 			wg.Wait()
 		},
+	}
+
+	cmd.Flags().String("log-file", "", "Log file path (default: <logs_dir>/lmd-ng-atp.log)")
+	cmd.Flags().Bool("service", false, "Running as OS service (internal)")
+
+	return cmd
+}
+
+// defaultLogFile returns the default per-component log file path under the
+// configured logs directory (e.g. <logs_dir>/lmd-ng-dbs.log).
+func defaultLogFile(cfg *config.Config, component string) string {
+	return filepath.Join(cfg.App.LogsDir, "lmd-ng-"+component+".log")
+}
+
+// verifyDependencies checks that all required services for a component are
+// running before the component starts. Returns nil if satisfied, or an error
+// describing the missing dependency. Only enforced when running as an OS
+// service (--service), where components run in separate processes.
+func verifyDependencies(cfg *config.Config, comp service.Component) error {
+	required := service.Dependencies[comp]
+	if len(required) == 0 {
+		return nil
+	}
+
+	for _, dep := range required {
+		status, err := service.StatusService(cfg, dep)
+		if err != nil {
+			return fmt.Errorf("cannot verify required service %q: %w", dep, err)
+		}
+		if status == nil || *status != kservice.StatusRunning {
+			return fmt.Errorf("required service %q is not running (status: %s)", dep, statusName(status))
+		}
+	}
+
+	return nil
+}
+
+// statusName formats a kservice status for error messages, defaulting to
+// "unknown" when the status is nil.
+func statusName(status *kservice.Status) string {
+	if status == nil {
+		return "unknown"
+	}
+	switch *status {
+	case kservice.StatusRunning:
+		return "running"
+	case kservice.StatusStopped:
+		return "stopped"
+	default:
+		return "unknown"
 	}
 }
 

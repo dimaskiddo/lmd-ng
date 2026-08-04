@@ -21,13 +21,29 @@ type Config struct {
 
 var logger *slog.Logger = slog.Default()
 
-// InitLogger initializes the structured logger with rotation.
+// InitLogger initializes the structured logger with rotation, writing to the
+// configured FilePath.
 func InitLogger(cfg *Config) {
+	InitLoggerWithPath(cfg.FilePath, cfg)
+}
+
+// InitLoggerWithPath initializes the global slog logger writing to the given
+// path with rotation. If logFilePath is empty, falls back to cfg.FilePath.
+// Rotation params (MaxSize, MaxBackups, MaxAge, Compress) come from cfg — the
+// same values are shared by every component logger, so ATP/DBS/RTP/scan logs
+// rotate with identical rules but independently (each has its own
+// lumberjack.Logger).
+func InitLoggerWithPath(logFilePath string, cfg *Config) {
+	effectivePath := logFilePath
+	if effectivePath == "" {
+		effectivePath = cfg.FilePath
+	}
+
 	var logWriter io.Writer
 
-	if cfg.Output == "file" && cfg.FilePath != "" {
+	if cfg.Output == "file" && effectivePath != "" {
 		lumberjackLogger := &lumberjack.Logger{
-			Filename:   cfg.FilePath,
+			Filename:   effectivePath,
 			MaxSize:    cfg.MaxSize,
 			MaxBackups: cfg.MaxBackups,
 			MaxAge:     cfg.MaxAge,

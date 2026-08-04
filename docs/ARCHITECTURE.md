@@ -123,7 +123,7 @@ sequenceDiagram
 | **Notifier** | `internal/notifier/` | Email (SMTP), Telegram (Bot API), Discord (webhook), Slack (incoming webhook) on quarantine events |
 | **Service** | `internal/service/` | OS service install via `kardianos/service` |
 | **Config** | `internal/config/` | YAML via Viper, path resolution, SIGHUP hot-reload |
-| **Log** | `internal/log/` | `log/slog` + lumberjack rotation, dual stdout+file output |
+| **Log** | `internal/log/` | `log/slog` + lumberjack rotation, dual stdout+file output. `InitLoggerWithPath` splits per-component logs (ATP/DBS/RTP/scan), all sharing the same rotation config |
 
 ---
 
@@ -350,15 +350,21 @@ Triggered on: **quarantine events only** (file detected + encrypted + moved).
 
 ### Components
 
-| Service Name | Component | Description |
-|---|---|---|
-| `lmd-ng-atp` | `atp` | Anti-Tamper Protection |
-| `lmd-ng-dbs` | `dbs` | Database Signature Server |
-| `lmd-ng-rtp` | `rtp` | Real-Time Protector |
+| Service Name | Component | Description | Requires Running |
+|---|---|---|---|
+| `lmd-ng-atp` | `atp` | Anti-Tamper Protection | — |
+| `lmd-ng-dbs` | `dbs` | Database Signature Server | `atp` |
+| `lmd-ng-rtp` | `rtp` | Real-Time Protector | `atp`, `dbs` |
+
+### Startup Dependencies
+
+When a component starts as an OS service (`daemon <comp> --service`), it verifies its required services are running before proceeding (`service.StatusService`). DBS requires ATP; RTP requires ATP+DBS. A missing/stopped dependency aborts startup with an error. Combined `lmd-ng daemon` starts all components in-process, so dependencies are satisfied by construction and no inter-service check runs.
 
 ### Install Flow
 
-Privilege check (Unix: UID==0; Windows: `Token.IsElevated()`) → resolve executable path → build `kardianos/service.Config` with `Arguments: ["daemon", "<component>"]` → platform config → `svc.Install()`.
+Privilege check (Unix: UID==0; Windows: `Token.IsElevated()`) → resolve executable path → build `kardianos/service.Config` with `Arguments: ["daemon", "<component>", "--service", "--config", "<cfgPath>", "--log-file", "<compLog>"]` → platform config → `svc.Install()`.
+
+The config path and the component's default log file path are baked into the service arguments so each service starts deterministically. `service install --log-file` overrides the component log path.
 
 ### Platform Differences
 
@@ -382,11 +388,14 @@ flowchart LR
     B -- No --> C["Exit<br>(up-to-date)"]
     B -->|"Yes / --force"| D["Download<br>zip archive"]
     D --> E["Extract<br>lmd-ng binary"]
-    E --> F{"OS?"}
+    E --> F0["Stop services<br>(RTP→DBS→ATP)"]
+    F0 --> F1["Uninstall services<br>(RTP→DBS→ATP)"]
+    F1 --> F{"OS?"}
     F -- Unix --> G["Atomic inode<br>swap (rename)"]
     F -- Windows --> H["Batch trampoline<br>(copy + restart)"]
-    G --> I["Restart<br>services"]
-    H --> I
+    G --> F2["Reinstall services<br>(ATP→DBS→RTP)"]
+    H --> F2["Reinstall services<br>(ATP→DBS→RTP)"]
+    F2 --> I["Start services<br>(ATP→DBS→RTP)"]
 ```
 
 ### Components
@@ -453,6 +462,6 @@ flowchart LR
 7. **PE section hash matching (MDB)** — Both engines parse PE headers on detected PE files, hash each section (MD5+SHA1+SHA256), and check against MDB signature databases. Covers packed/mutated malware where full-file hashes differ but section content signatures match.
 8. **Permission resiliency** — walker never crashes on `os.ErrPermission`. Log at Warn/Debug, continue to next file
 9. **Stdlib first** — minimal third-party deps. Zig CC for CGO cross-compilation, not raw gcc/clang
-10. **Dual output logging** — `slog` structured logging with lumberjack rotation, simultaneous stdout + file via `io.MultiWriter`
+10. **Dual output logging** — `slog` structured logging with lumberjack rotation, simultaneous stdout + file via `io.MultiWriter`. Per-component log files via `InitLoggerWithPath`; all loggers share the config `logging` rotation settings
 11. **Config paths relative to binary** — all paths resolved from binary's real directory, not CWD. Avoids ambiguity in daemon/service mode
 12. **Platform-aware self-upgrade** — Linux/macOS: atomic inode rename. Windows: batch trampoline (copies new binary, exits old process, batch swaps + restarts services). Service-aware: only restarts installed services.

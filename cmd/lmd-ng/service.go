@@ -31,13 +31,20 @@ For install/start: ATP, then DBS, then RTP.
 For stop/uninstall: RTP, then DBS, then ATP.`,
 	}
 
-	serviceCmd.AddCommand(&cobra.Command{
+	installCmd := &cobra.Command{
 		Use:   "install [atp|dbs|rtp]",
 		Short: "Install LMD-NG as System Service",
 		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg := cfgMgr.GetConfig()
-			components := resolveComponents(args, false) // install order: dbs first
+			components := resolveComponents(args, false) // install order: ATP first
+
+			// Resolve the config file path to bake into the service arguments,
+			// so each service starts with the same explicit config.
+			cfgPath := cfgMgr.Viper.ConfigFileUsed()
+
+			// Optional override: a single log file for the installed component(s).
+			logFile, _ := cmd.Flags().GetString("log-file")
 
 			// Auto-migrate: uninstall legacy monolithic service if it exists
 			if err := service.UninstallLegacyService(); err != nil {
@@ -46,15 +53,22 @@ For stop/uninstall: RTP, then DBS, then ATP.`,
 			}
 
 			for _, comp := range components {
-				if err := service.InstallService(cfg, comp); err != nil {
+				compLogFile := logFile
+				if compLogFile == "" {
+					compLogFile = defaultLogFile(cfg, string(comp))
+				}
+
+				if err := service.InstallService("", cfgPath, compLogFile, comp); err != nil {
 					handleServiceError(err, "install", comp)
 					return
 				}
 
-				log.Info("Service installed successfully", "component", comp)
+				log.Info("Service installed successfully", "component", comp, "log_file", compLogFile)
 			}
 		},
-	})
+	}
+	installCmd.Flags().String("log-file", "", "Override the default log file path baked into the installed service(s)")
+	serviceCmd.AddCommand(installCmd)
 
 	serviceCmd.AddCommand(&cobra.Command{
 		Use:   "uninstall [atp|dbs|rtp]",

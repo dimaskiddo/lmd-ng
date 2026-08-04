@@ -33,7 +33,7 @@ Rewrite Linux Malware Detect (LMD/Maldet) from Bash into a modern Golang applica
 | **Quarantine** | AES-256-GCM encryption, POSIX metadata capture/restore, short-ID lookup |
 | **Protocol** | Custom binary wire protocol: `[1-byte type][4-byte length][payload]` over TLS |
 | **Notifier** | `Notifier` interface + MultiNotifier; Email (SMTP), Telegram (Bot API), Discord (webhook), Slack (incoming webhook) |
-| **Service** | OS service install/uninstall via `kardianos/service` — `dbs` and `rtp` as separate services |
+| **Service** | OS service install/uninstall via `kardianos/service` — `atp`, `dbs`, and `rtp` as separate services with startup dependencies (DBS requires ATP; RTP requires ATP+DBS), verified via `StatusService` when a component starts as a service (`--service`) |
 | **Upgrade** | Binary self-upgrade — GitHub Releases API, platform-specific swap (Unix: atomic rename; Windows: batch trampoline) |
 | **Config** | Viper YAML config, path resolution, SIGHUP hot-reload |
 | **Log** | `log/slog` + lumberjack rotation, dual stdout+file output |
@@ -61,17 +61,17 @@ Scan runs in two passes. Pass 1 (hash-based, deterministic) runs all engines' `S
 ```
 lmd-ng [--config <path>]
   daemon                  # Start ATP + DBS + RTP in single process (ATP starts first)
-    atp                   # Start only Anti-Tamper Protection daemon
-    dbs                   # Start only DBS server
-    rtp                   # Start only RTP client
-  scan <path>             # On-demand scan (DBS-first, local fallback)
+    atp [--log-file P]    # Start only Anti-Tamper Protection daemon (own log)
+    dbs [--log-file P]    # Start only DBS server (own log)
+    rtp [--log-file P]    # Start only RTP client (own log)
+  scan <path> [--log-file P]  # On-demand scan (DBS-first, local fallback)
   update                  # Manual signature update
   upgrade [--force]       # Self-upgrade binary from GitHub releases
   status                  # Display DBS status, signature counts, versions, quarantine, RTP, scheduler
   service
-    install [atp|dbs|rtp]     # Install as OS service
+    install [atp|dbs|rtp] [--log-file P]  # Install as OS service
     uninstall [atp|dbs|rtp]   # Remove OS service
-    start/stop/restart        # [atp|dbs|rtp]
+    start/stop/restart    # [atp|dbs|rtp]
   quarantine
     list                  # List quarantined files
     add <file>            # Manually quarantine
@@ -79,6 +79,8 @@ lmd-ng [--config <path>]
     remove <id|path>      # Permanently delete (requires --force)
   version
 ```
+
+Each daemon component has its own log file: `daemon atp/dbs/rtp --log-file` (default `<logs_dir>/lmd-ng-<component>.log`). `scan` defaults to the config `logging.filepath` and only writes a separate file with `--log-file`. `service install` bakes the config path, the component's log file, and the internal `--service` flag into the service definition. When run as a service, startup verifies dependencies (DBS needs ATP, RTP needs ATP+DBS) and fails otherwise.
 
 ---
 
@@ -110,6 +112,7 @@ lmd-ng [--config <path>]
 ### Logging
 - `log/slog` only. No `fmt.Println` or `log.Fatal` in core packages.
 - `lumberjack` for rotation. Rotation params bound to config.
+- Per-component log files: `InitLoggerWithPath` splits ATP/DBS/RTP/scan logs; every logger shares the same rotation config (`max_size`, `max_backups`, `max_age`, `compress`) from `config.yaml`, only the filename differs.
 
 ### Context & Concurrency
 - `context.Context` as first param for long-running functions. Scan methods check `ctx.Done()` intra-pass (hash computation, PE section parsing, heuristic scanning).

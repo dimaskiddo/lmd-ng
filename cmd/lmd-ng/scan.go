@@ -21,12 +21,19 @@ func scanCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			scanPath = args[0]
+
+			// On-demand scan uses the configured main log by default, but can be
+			// overridden to a dedicated scan log for easier debugging.
+			cfg := cfgMgr.GetConfig()
+			lp, _ := cmd.Flags().GetString("log-file")
+			if lp != "" {
+				log.InitLoggerWithPath(lp, logConfig(cfg.Logging))
+			}
+
 			log.Info("Starting on-demand scan", "path", scanPath)
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-
-			cfg := cfgMgr.GetConfig()
 
 			// Try to connect to DBS server first
 			dbsClient, err := dbs.NewClient(cfg)
@@ -47,6 +54,8 @@ func scanCmd() *cobra.Command {
 			runDBSScan(ctx, dbsClient, scanPath)
 		},
 	}
+
+	cmd.Flags().String("log-file", "", "Log file path (default: config logging.filepath)")
 
 	return cmd
 }

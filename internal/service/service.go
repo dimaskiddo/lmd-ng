@@ -31,6 +31,19 @@ const (
 	legacyServiceName = "lmd-ng"
 )
 
+// DependencyOrder lists components in startup order: ATP first (locks critical
+// files), then DBS (loads signatures), then RTP (connects to DBS).
+var DependencyOrder = []Component{ComponentATP, ComponentDBS, ComponentRTP}
+
+// Dependencies maps each component to the set of services that must be running
+// before it can start. ATP protects files first; DBS requires the files it
+// reads (signatures, TLS certs) to be locked; RTP requires a live DBS server.
+var Dependencies = map[Component][]Component{
+	ComponentATP: {},
+	ComponentDBS: {ComponentATP},
+	ComponentRTP: {ComponentATP, ComponentDBS},
+}
+
 // ErrInsufficientPrivilege is returned when the caller does not have the
 // required elevated privileges to install or uninstall a system service.
 var ErrInsufficientPrivilege = errors.New("insufficient privileges: service management requires root (Linux/macOS) or Administrator (Windows) access")
@@ -73,13 +86,25 @@ func displayName(comp Component) string {
 }
 
 // buildServiceConfig constructs the kardianos/service Config for a specific component.
-func buildServiceConfig(exePath string, comp Component) *kservice.Config {
+// cfgPath is the resolved config file path (empty to rely on auto-discovery).
+// logFilePath is the component's log file (defaults to the logs dir if empty).
+// These are baked into Arguments so the OS service manager always starts the
+// component with the correct --config, --log-file and --service flags.
+func buildServiceConfig(exePath string, comp Component, cfgPath, logFilePath string) *kservice.Config {
+	args := []string{"daemon", string(comp), "--service"}
+	if cfgPath != "" {
+		args = append(args, "--config", cfgPath)
+	}
+	if logFilePath != "" {
+		args = append(args, "--log-file", logFilePath)
+	}
+
 	cfg := &kservice.Config{
 		Name:             serviceName(comp),
 		DisplayName:      displayName(comp),
 		Description:      fmt.Sprintf("Linux Malware Detect Next Generation (LMD-NG) - %s", displayName(comp)),
 		WorkingDirectory: filepath.Dir(exePath),
-		Arguments:        []string{"daemon", string(comp)},
+		Arguments:        args,
 	}
 
 	// Delegate platform-specific privilege and option population.
@@ -140,17 +165,23 @@ func UninstallLegacyService() error {
 }
 
 // InstallService installs a specific component as an OS-level system service.
-func InstallService(_ *config.Config, comp Component) error {
+// exePath is the binary to register (the running executable when empty).
+// cfgPath is the resolved config file path baked into the service arguments
+// (empty to rely on auto-discovery). logFilePath is the component log path.
+func InstallService(exePath, cfgPath, logFilePath string, comp Component) error {
 	if err := checkPrivilege(); err != nil {
 		return fmt.Errorf("install service %s: %w", comp, err)
 	}
 
-	exePath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("failed to resolve executable path: %w", err)
+	if exePath == "" {
+		var err error
+		exePath, err = os.Executable()
+		if err != nil {
+			return fmt.Errorf("failed to resolve executable path: %w", err)
+		}
 	}
 
-	svcConfig := buildServiceConfig(exePath, comp)
+	svcConfig := buildServiceConfig(exePath, comp, cfgPath, logFilePath)
 
 	svc, err := kservice.New(&LMDService{}, svcConfig)
 	if err != nil {
@@ -258,4 +289,25 @@ func IsServiceInstalled(comp Component) bool {
 
 	_, err = svc.Status()
 	return err == nil
+}
+
+// StatusService reports the current OS service status for a component. It
+// requires elevated privileges to query.
+func StatusService(_ *config.Config, comp Component) (*kservice.Status, error) {
+	if err := checkPrivilege(); err != nil {
+		return nil, fmt.Errorf("status service %s: %w", comp, err)
+	}
+
+	svcConfig := &kservice.Config{Name: serviceName(comp)}
+	svc, err := kservice.New(&LMDService{}, svcConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create service handle for %s: %w", comp, err)
+	}
+
+	status, err := svc.Status()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get status for %s: %w", comp, err)
+	}
+
+	return &status, nil
 }

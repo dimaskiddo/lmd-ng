@@ -23,6 +23,22 @@ var (
 	cfgMgr  *config.Manager
 )
 
+// logConfig converts a config.LoggingConfig into the logger package's Config,
+// mapping the shared rotation settings. Each daemon component and the scan
+// command builds one of these from the loaded config, then passes a custom
+// file path to InitLoggerWithPath to split logs per component.
+func logConfig(lc config.LoggingConfig) *log.Config {
+	return &log.Config{
+		Level:      lc.Level,
+		Output:     lc.Output,
+		FilePath:   lc.FilePath,
+		MaxSize:    lc.MaxSize,
+		MaxBackups: lc.MaxBackups,
+		MaxAge:     lc.MaxAge,
+		Compress:   lc.Compress,
+	}
+}
+
 func main() {
 	var err error
 
@@ -35,15 +51,7 @@ func main() {
 	}
 
 	// Initialize the logger using the loaded configuration
-	log.InitLogger(&log.Config{
-		Level:      cfgMgr.GetConfig().Logging.Level,
-		Output:     cfgMgr.GetConfig().Logging.Output,
-		FilePath:   cfgMgr.GetConfig().Logging.FilePath,
-		MaxSize:    cfgMgr.GetConfig().Logging.MaxSize,
-		MaxBackups: cfgMgr.GetConfig().Logging.MaxBackups,
-		MaxAge:     cfgMgr.GetConfig().Logging.MaxAge,
-		Compress:   cfgMgr.GetConfig().Logging.Compress,
-	})
+	log.InitLogger(logConfig(cfgMgr.GetConfig().Logging))
 
 	rootCmd := &cobra.Command{
 		Use:   "lmd-ng",

@@ -159,6 +159,40 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 		fmt.Println()
 	}
 
+	// --- Uninstall services (after stop, before binary replace) ---
+	// Uninstall in reverse dependency order (RTP → DBS → ATP). The services
+	// are reinstalled after the binary swap so their definitions (Arguments)
+	// are refreshed to match the new binary.
+	if atpInstalled || dbsInstalled || rtpInstalled {
+		fmt.Println("  Uninstalling services...")
+
+		if rtpInstalled {
+			if err := service.UninstallService(cfg, service.ComponentRTP); err != nil {
+				log.Warn("Failed to uninstall RTP service (continuing)", "error", err)
+			} else {
+				fmt.Println("    RTP uninstalled")
+			}
+		}
+
+		if dbsInstalled {
+			if err := service.UninstallService(cfg, service.ComponentDBS); err != nil {
+				log.Warn("Failed to uninstall DBS service (continuing)", "error", err)
+			} else {
+				fmt.Println("    DBS uninstalled")
+			}
+		}
+
+		if atpInstalled {
+			if err := service.UninstallService(cfg, service.ComponentATP); err != nil {
+				log.Warn("Failed to uninstall ATP service (continuing)", "error", err)
+			} else {
+				fmt.Println("    ATP uninstalled")
+			}
+		}
+
+		fmt.Println()
+	}
+
 	// --- Replace binary ---
 	fmt.Println("  Replacing binary...")
 
@@ -189,6 +223,41 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 
 	fmt.Println("    Binary replaced")
 	fmt.Println()
+
+	// --- Reinstall services (after binary replace, before start) ---
+	// Reinstall in dependency order (ATP → DBS → RTP) with explicit config and
+	// per-component default log paths baked into the service arguments.
+	if atpInstalled || dbsInstalled || rtpInstalled {
+		fmt.Println("  Reinstalling services...")
+
+		cfgPath := cfgMgr.Viper.ConfigFileUsed()
+
+		if atpInstalled {
+			if err := service.InstallService(exePath, cfgPath, defaultLogFile(cfg, "atp"), service.ComponentATP); err != nil {
+				log.Warn("Failed to reinstall ATP service", "error", err)
+			} else {
+				fmt.Println("    ATP reinstalled")
+			}
+		}
+
+		if dbsInstalled {
+			if err := service.InstallService(exePath, cfgPath, defaultLogFile(cfg, "dbs"), service.ComponentDBS); err != nil {
+				log.Warn("Failed to reinstall DBS service", "error", err)
+			} else {
+				fmt.Println("    DBS reinstalled")
+			}
+		}
+
+		if rtpInstalled {
+			if err := service.InstallService(exePath, cfgPath, defaultLogFile(cfg, "rtp"), service.ComponentRTP); err != nil {
+				log.Warn("Failed to reinstall RTP service", "error", err)
+			} else {
+				fmt.Println("    RTP reinstalled")
+			}
+		}
+
+		fmt.Println()
+	}
 
 	// --- Start services (if they were installed) ---
 	// Order: ATP → DBS → RTP. ATP locks files first, then DBS reads

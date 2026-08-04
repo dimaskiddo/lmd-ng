@@ -121,7 +121,7 @@ chmod +x lmd-ng
 # Update signature databases
 ./lmd-ng update
 
-# Install services (requires sudo) — ATP locks LMD-NG files against tampering
+# Install services (requires sudo)
 sudo ./lmd-ng service install atp
 sudo ./lmd-ng service install dbs
 sudo ./lmd-ng service install rtp
@@ -181,8 +181,10 @@ LMD-NG is managed via a CLI:
 *   **`lmd-ng daemon dbs`**: Start only the Database Signature Service.
 *   **`lmd-ng daemon rtp`**: Start only the Real-Time Protector (monitors file system).
 
+Each daemon component writes to its **own log file** (default `<logs_dir>/lmd-ng-<component>.log`), overridable with `--log-file`.
+
 ### 🔍 Scanning & Updates
-*   **`lmd-ng scan <path>`**: Perform an on-demand scan. Streams data to the local DBS.
+*   **`lmd-ng scan <path>`**: Perform an on-demand scan. Streams data to the local DBS. Uses the main config log path by default; pass `--log-file` to redirect to a separate scan log.
 *   **`lmd-ng update`**: Update signatures and trigger a hot-reload in the running DBS.
 *   **`lmd-ng upgrade [--force]`**: Self-upgrade binary from GitHub releases. Without `--force`, exits early if already up-to-date.
 *   **`lmd-ng status`**: Display DBS reachability, signature counts, CVD versions, quarantine, RTP config.
@@ -194,14 +196,31 @@ LMD-NG is managed via a CLI:
 *   **`lmd-ng quarantine restore <id|path>`**: Safely restore a file to its original location with full attribute preservation.
 *   **`lmd-ng quarantine remove <id|path>`**: Permanently delete a threat (requires `--force`).
 
+### 📁 Log Files
+
+Each component writes to its own file for easier debugging. All logs rotate with the same settings from the `logging` section of `config.yaml` (`max_size`, `max_backups`, `max_age`, `compress`).
+
+| Component | Default path |
+|---|---|
+| Combined daemon | `<logs_dir>/lmd-ng.log` (config `logging.filepath`) |
+| ATP | `<logs_dir>/lmd-ng-atp.log` |
+| DBS | `<logs_dir>/lmd-ng-dbs.log` |
+| RTP | `<logs_dir>/lmd-ng-rtp.log` |
+| On-demand scan | config `logging.filepath` (or `--log-file`) |
+
+---
+
 ### ⚙️ Service Management
 Manage LMD-NG components as background services (Systemd, Launchd, or Windows Services). Operations require elevated privileges.
+
+Services are installed with startup **dependencies** baked in: `dbs` requires `atp`, and `rtp` requires both `atp` and `dbs`. Starting a service whose dependency is not running fails with a clear error. `service install` also bakes in the config path and a per-component log file (override with `--log-file`).
 
 *   **Install Services**:
     *   `lmd-ng service install`: Register **ATP**, **DBS**, and **RTP** services.
     *   `lmd-ng service install atp`: Register only the Anti-Tamper Protection daemon.
     *   `lmd-ng service install dbs`: Register only the Database Signature Service (server).
     *   `lmd-ng service install rtp`: Register only the Real-Time Protector (client).
+    *   `lmd-ng service install dbs --log-file /var/log/lmd-ng/dbs.log`: Install with an explicit log path.
 *   **Control Services**:
     *   `lmd-ng service start [atp|dbs|rtp]`: Start services. If no component is specified, **ATP is started first**, followed by **DBS**, then **RTP**.
     *   `lmd-ng service stop [atp|dbs|rtp]`: Stop services. If no component is specified, **RTP is stopped first**, followed by **DBS**, then **ATP** (ATP releases last).
