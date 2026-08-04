@@ -22,4 +22,7 @@ func (p *Protector) startMonitor(ctx context.Context, files []string, control <-
 	<-ctx.Done()
 }
 
+// IsImmuneSet is false on unsupported platforms (no protection to verify).
+func IsImmuneSet(path string) bool { return false }
+
 func isImmutableSet(path string) bool { return false }

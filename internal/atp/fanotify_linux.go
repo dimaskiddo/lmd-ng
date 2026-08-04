@@ -5,6 +5,7 @@ package atp
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
@@ -71,6 +72,22 @@ func flushMarks(fd int) {
 	}
 }
 
+// waitUntilShutdown blocks until ctx is cancelled or a shutdown command is
+// received. Used when fanotify is unavailable so the goroutine still terminates
+// cleanly with the daemon.
+func waitUntilShutdown(ctx context.Context, control <-chan string) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case cmd := <-control:
+			if cmd == "shutdown" {
+				return
+			}
+		}
+	}
+}
+
 // startMonitor runs the fanotify permission-event loop until ctx is cancelled
 // or a shutdown/unlock command is received.
 func (p *Protector) startMonitor(ctx context.Context, files []string, control <-chan string) {
@@ -80,16 +97,8 @@ func (p *Protector) startMonitor(ctx context.Context, files []string, control <-
 	if err != nil {
 		log.Warn("ATP: fanotify_init failed",
 			"error", err)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case cmd := <-control:
-				if cmd == "shutdown" {
-					return
-				}
-			}
-		}
+		waitUntilShutdown(ctx, control)
+		return
 	}
 	defer unix.Close(fd)
 
@@ -99,6 +108,8 @@ func (p *Protector) startMonitor(ctx context.Context, files []string, control <-
 	protected := p.buildInodeSet(files)
 
 	buf := make([]byte, 65536)
+	var consecutiveErrors int
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -137,11 +148,50 @@ func (p *Protector) startMonitor(ctx context.Context, files []string, control <-
 				}
 				continue
 			}
-			// EINTR and transient errors are retried.
+
+			if errors.Is(err, syscall.EBADF) {
+				// The fanotify fd is stale after sleep/hibernate. Closing it
+				// destroys the group and auto-allows pending permission events,
+				// unblocking processes waiting on a FAN_OPEN_PERM response.
+				log.Warn("ATP: fanotify fd stale (post-sleep/hibernate), re-initializing")
+				unix.Close(fd)
+
+				fd, err = unix.FanotifyInit(unix.FAN_CLASS_PRE_CONTENT, unix.O_CLOEXEC|unix.O_NONBLOCK)
+				if err != nil {
+					log.Warn("ATP: fanotify re-init failed — protection limited to immutable flags",
+						"error", err)
+					waitUntilShutdown(ctx, control)
+					return
+				}
+				marked := markAll(fd, files)
+				log.Info("ATP: fanotify permission listener re-initialized", "watched_files", marked)
+				consecutiveErrors = 0
+				continue
+			}
+
+			// EINTR and transient errors are retried, debounced to avoid a
+			// tight spin if an unexpected error persists.
+			consecutiveErrors++
+			if consecutiveErrors >= 10 {
+				timer := time.NewTimer(time.Second)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case cmd := <-control:
+					timer.Stop()
+					if cmd == "shutdown" {
+						return
+					}
+				case <-timer.C:
+				}
+				consecutiveErrors = 0
+			}
 			log.Debug("ATP: fanotify read", "error", err)
 			continue
 		}
 
+		consecutiveErrors = 0
 		p.handleEvents(buf[:n], fd, protected)
 	}
 }

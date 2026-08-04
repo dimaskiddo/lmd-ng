@@ -77,6 +77,10 @@ func clearSFImmutable(path string) error {
 	return nil
 }
 
+// IsImmuneSet reports whether a protected file is currently immutable, i.e.
+// whether ATP protection is active on it. Used by status display.
+func IsImmuneSet(path string) bool { return isSFImmutableSet(path) }
+
 // isSFImmutableSet reports whether SF_IMMUTABLE is set on a file.
 // Reads the fl_flags field via the stat structure.
 func isSFImmutableSet(path string) bool {

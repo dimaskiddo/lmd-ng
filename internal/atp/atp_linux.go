@@ -101,6 +101,10 @@ func clearImmutable(path string) error {
 	return nil
 }
 
+// IsImmuneSet reports whether a protected file is currently immutable, i.e.
+// whether ATP protection is active on it. Used by status display.
+func IsImmuneSet(path string) bool { return isImmutableSet(path) }
+
 // isImmutableSet reports whether FS_IMMUTABLE_FL is currently set on a file.
 func isImmutableSet(path string) bool {
 	f, err := os.Open(path)

@@ -42,9 +42,11 @@ func runStatus(cmd *cobra.Command, args []string) {
 	fmt.Printf("  %-18s %s\n", "Base Path:", cfg.App.BasePath)
 	fmt.Printf("  %-18s %s\n", "Log Level:", cfg.Logging.Level)
 
-	atpStatus := "active"
+	atpStatus := "inactive"
 	if atp.SelfExeDeleted() {
-		atpStatus = "TAMPER DETECTED (Binary INode Replaced)"
+		atpStatus = "active (binary inode replaced!)"
+	} else if isTPProtected(cfg) {
+		atpStatus = "active"
 	}
 	fmt.Printf("  %-18s %s\n", "Anti-Tamper:", atpStatus)
 	fmt.Println()
@@ -133,6 +135,20 @@ func runStatus(cmd *cobra.Command, args []string) {
 	} else {
 		fmt.Printf("    %-16s never\n", "Last Update:")
 	}
+}
+
+// isTPProtected reports whether ATP protection is actually active by probing
+// the immutable flag on a known protected file (TLS cert, else the binary).
+func isTPProtected(cfg *config.Config) bool {
+	certFile, _, _ := protocol.ServerCertPaths(cfg)
+	if certFile != "" && atp.IsImmuneSet(certFile) {
+		return true
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return atp.IsImmuneSet(exe)
 }
 
 // printSignatureStats prints engine signature counts from DBS status data.

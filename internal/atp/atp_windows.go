@@ -197,6 +197,11 @@ func (p *Protector) recheckFiles(files []string) {
 	}
 }
 
+// IsImmuneSet reports whether a protected file is protected (exists; Windows
+// holds exclusive handles in-process, so cross-process there is no persistent
+// flag to probe).
+func IsImmuneSet(path string) bool { return isImmutableSet(path) }
+
 // isImmutableSet reports whether a protected file exists.
 func isImmutableSet(path string) bool {
 	_, err := os.Stat(path)
