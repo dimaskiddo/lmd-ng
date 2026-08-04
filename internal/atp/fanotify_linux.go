@@ -4,7 +4,6 @@ package atp
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -27,19 +26,6 @@ type fanotifyEventMetadata struct {
 	Pid         int32
 }
 
-// fanotifyResponse is written back to the fanotify fd to permit or deny a
-// pending permission event.
-type fanotifyResponse struct {
-	Fd       int32
-	Response uint32
-}
-
-// fanotify permission responses.
-const (
-	respAllow uint32 = 0 // FAN_ALLOW
-	respDeny  uint32 = 1 // FAN_DENY
-)
-
 // inodeSet maps device -> set of inodes for O(1) protected-file probes.
 type inodeSet map[uint64]map[uint64]struct{}
 
@@ -56,20 +42,13 @@ func (s inodeSet) has(dev, ino uint64) bool {
 func markAll(fd int, files []string) int {
 	marked := 0
 	for _, f := range files {
-		if err := unix.FanotifyMark(fd, unix.FAN_MARK_ADD, unix.FAN_OPEN_PERM, unix.AT_FDCWD, f); err != nil {
+		if err := unix.FanotifyMark(fd, unix.FAN_MARK_ADD, unix.FAN_OPEN, unix.AT_FDCWD, f); err != nil {
 			log.Debug("ATP: fanotify mark failed", "path", f, "error", err)
 			continue
 		}
 		marked++
 	}
 	return marked
-}
-
-// flushMarks removes all marks from the fanotify fd.
-func flushMarks(fd int) {
-	if err := unix.FanotifyMark(fd, unix.FAN_MARK_FLUSH, 0, unix.AT_FDCWD, ""); err != nil {
-		log.Debug("ATP: fanotify mark flush failed", "error", err)
-	}
 }
 
 // waitUntilShutdown blocks until ctx is cancelled or a shutdown command is
@@ -88,12 +67,14 @@ func waitUntilShutdown(ctx context.Context, control <-chan string) {
 	}
 }
 
-// startMonitor runs the fanotify permission-event loop until ctx is cancelled
-// or a shutdown/unlock command is received.
+// startMonitor runs the fanotify notification-event loop until ctx is cancelled
+// or a shutdown command is received. FAN_CLASS_NOTIF never blocks openers — the
+// kernel delivers open notifications and proceeds immediately. Immutable flags
+// (chattr +i) remain the enforcement layer.
 func (p *Protector) startMonitor(ctx context.Context, files []string, control <-chan string) {
 	go p.startInotifyMonitor(ctx, files)
 
-	fd, err := unix.FanotifyInit(unix.FAN_CLASS_PRE_CONTENT, unix.O_CLOEXEC|unix.O_NONBLOCK)
+	fd, err := unix.FanotifyInit(unix.FAN_CLASS_NOTIF, unix.O_CLOEXEC|unix.O_NONBLOCK)
 	if err != nil {
 		log.Warn("ATP: fanotify_init failed",
 			"error", err)
@@ -103,7 +84,7 @@ func (p *Protector) startMonitor(ctx context.Context, files []string, control <-
 	defer unix.Close(fd)
 
 	marked := markAll(fd, files)
-	log.Info("ATP: fanotify permission listener active", "watched_files", marked)
+	log.Info("ATP: fanotify notification listener active", "watched_files", marked)
 
 	protected := p.buildInodeSet(files)
 
@@ -115,13 +96,8 @@ func (p *Protector) startMonitor(ctx context.Context, files []string, control <-
 		case <-ctx.Done():
 			return
 		case cmd := <-control:
-			switch cmd {
-			case "shutdown":
+			if cmd == "shutdown" {
 				return
-			case "unlock":
-				flushMarks(fd)
-			case "lock":
-				markAll(fd, files)
 			}
 		default:
 		}
@@ -136,13 +112,8 @@ func (p *Protector) startMonitor(ctx context.Context, files []string, control <-
 					return
 				case cmd := <-control:
 					timer.Stop()
-					switch cmd {
-					case "shutdown":
+					if cmd == "shutdown" {
 						return
-					case "unlock":
-						flushMarks(fd)
-					case "lock":
-						markAll(fd, files)
 					}
 				case <-timer.C:
 				}
@@ -151,12 +122,11 @@ func (p *Protector) startMonitor(ctx context.Context, files []string, control <-
 
 			if errors.Is(err, syscall.EBADF) {
 				// The fanotify fd is stale after sleep/hibernate. Closing it
-				// destroys the group and auto-allows pending permission events,
-				// unblocking processes waiting on a FAN_OPEN_PERM response.
+				// destroys the group; notifications are re-marked on a fresh fd.
 				log.Warn("ATP: fanotify fd stale (post-sleep/hibernate), re-initializing")
 				unix.Close(fd)
 
-				fd, err = unix.FanotifyInit(unix.FAN_CLASS_PRE_CONTENT, unix.O_CLOEXEC|unix.O_NONBLOCK)
+				fd, err = unix.FanotifyInit(unix.FAN_CLASS_NOTIF, unix.O_CLOEXEC|unix.O_NONBLOCK)
 				if err != nil {
 					log.Warn("ATP: fanotify re-init failed — protection limited to immutable flags",
 						"error", err)
@@ -164,7 +134,7 @@ func (p *Protector) startMonitor(ctx context.Context, files []string, control <-
 					return
 				}
 				marked := markAll(fd, files)
-				log.Info("ATP: fanotify permission listener re-initialized", "watched_files", marked)
+				log.Info("ATP: fanotify notification listener re-initialized", "watched_files", marked)
 				consecutiveErrors = 0
 				continue
 			}
@@ -192,12 +162,12 @@ func (p *Protector) startMonitor(ctx context.Context, files []string, control <-
 		}
 
 		consecutiveErrors = 0
-		p.handleEvents(buf[:n], fd, protected)
+		p.handleEvents(buf[:n], protected)
 	}
 }
 
-// handleEvents processes raw fanotify events and responds to FAN_OPEN_PERM.
-func (p *Protector) handleEvents(buf []byte, fd int, protected inodeSet) {
+// handleEvents processes raw fanotify events and logs opens of protected files.
+func (p *Protector) handleEvents(buf []byte, protected inodeSet) {
 	offset := 0
 	for offset+int(unsafe.Sizeof(fanotifyEventMetadata{})) <= len(buf) {
 		meta := (*fanotifyEventMetadata)(unsafe.Pointer(&buf[offset]))
@@ -208,8 +178,8 @@ func (p *Protector) handleEvents(buf []byte, fd int, protected inodeSet) {
 			break
 		}
 
-		if meta.Mask&unix.FAN_OPEN_PERM != 0 {
-			p.respond(fd, meta, protected)
+		if meta.Mask&unix.FAN_OPEN != 0 {
+			p.logOpen(meta, protected)
 		}
 
 		if meta.Fd >= 0 {
@@ -220,44 +190,25 @@ func (p *Protector) handleEvents(buf []byte, fd int, protected inodeSet) {
 	}
 }
 
-// respond decides allow/deny for a single open-permission event and writes
-// the response back to the fanotify fd.
-func (p *Protector) respond(fd int, meta *fanotifyEventMetadata, protected inodeSet) {
-	resp := fanotifyResponse{Fd: meta.Fd, Response: respAllow}
-
+// logOpen logs when a protected file is opened by another process. Open is
+// allowed — immutable flags are what prevent modification.
+func (p *Protector) logOpen(meta *fanotifyEventMetadata, protected inodeSet) {
 	if int(meta.Pid) == os.Getpid() {
-		writeResponse(fd, resp)
 		return
 	}
 
 	target, err := os.Stat(fmt.Sprintf("/proc/self/fd/%d", meta.Fd))
 	if err != nil {
-		writeResponse(fd, resp)
 		return
 	}
 
 	st, ok := target.Sys().(*syscall.Stat_t)
 	if !ok {
-		writeResponse(fd, resp)
 		return
 	}
 
 	if protected.has(uint64(st.Dev), st.Ino) {
-		resp.Response = respDeny
-		log.Warn("ATP: denied write open on protected file",
-			"pid", meta.Pid, "inode", st.Ino)
-	}
-
-	writeResponse(fd, resp)
-}
-
-// writeResponse writes a fanotify response to the fanotify fd.
-func writeResponse(fd int, resp fanotifyResponse) {
-	var b [8]byte
-	binary.LittleEndian.PutUint32(b[0:4], uint32(resp.Fd))
-	binary.LittleEndian.PutUint32(b[4:8], resp.Response)
-	if _, err := unix.Write(fd, b[:]); err != nil {
-		log.Debug("ATP: fanotify response write", "error", err)
+		log.Warn("ATP: protected file opened", "pid", meta.Pid, "inode", st.Ino)
 	}
 }
 

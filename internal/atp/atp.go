@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
@@ -13,10 +14,15 @@ import (
 
 // Protector implements cross-platform active anti-tamper protection.
 type Protector struct {
-	cfg *config.Config
+	cfg   *config.Config
+	files []string
 	// alert broadcasts a tamper alert. Set by the daemon via SetAlertFunc.
 	alert func(title, message string)
 }
+
+// pidFileName is the PID file name under the app base path, used by status
+// to confirm ATP is running (immutable flags alone survive a crash).
+const pidFileName = "lmd-ng-atp.pid"
 
 // SetAlertFunc registers a callback used to broadcast tamper alerts to
 // configured notifiers. The daemon wires this to MultiNotifier.SendAlert.
@@ -49,6 +55,14 @@ func (p *Protector) Protect(ctx context.Context) (chan string, error) {
 		close(ch)
 		return ch, nil
 	}
+	p.files = files
+
+	// Clear stale immutable flags from a previous crashed session before
+	// applying fresh protection. Non-fatal: flags may not exist or the
+	// filesystem may not support them.
+	if err := p.removeProtection(files); err != nil {
+		log.Warn("ATP: failed to clear stale protection flags", "error", err)
+	}
 
 	log.Info("ATP: protecting files", "count", len(files))
 
@@ -62,6 +76,10 @@ func (p *Protector) Protect(ctx context.Context) (chan string, error) {
 	go p.startMonitor(ctx, files, control)
 	go p.periodicRecheck(ctx, files, control)
 
+	if err := p.writePID(); err != nil {
+		log.Warn("ATP: failed to write PID file", "error", err)
+	}
+
 	log.Info("ATP: protection active")
 	return control, nil
 }
@@ -70,6 +88,34 @@ func (p *Protector) Protect(ctx context.Context) (chan string, error) {
 // Called before self-upgrade so the binary can be replaced.
 func (p *Protector) ReleaseAll(files []string) error {
 	return p.removeProtection(files)
+}
+
+// ProtectedFiles returns the files ATP currently protects. Empty before
+// Protect is called. Used by shutdown to clear immutable flags.
+func (p *Protector) ProtectedFiles() []string {
+	return p.files
+}
+
+// Done stops ATP cleanly: clears immutable flags and removes the PID file.
+func (p *Protector) Done() {
+	if len(p.files) > 0 {
+		if err := p.removeProtection(p.files); err != nil {
+			log.Warn("ATP: failed to clear protection flags on shutdown", "error", err)
+		}
+	}
+	p.removePID()
+}
+
+// writePID writes the current process ID to the PID file.
+func (p *Protector) writePID() error {
+	pidFile := filepath.Join(p.cfg.App.BasePath, pidFileName)
+	return os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644)
+}
+
+// removePID removes the PID file if present.
+func (p *Protector) removePID() {
+	pidFile := filepath.Join(p.cfg.App.BasePath, pidFileName)
+	os.Remove(pidFile)
 }
 
 // protectedFiles derives the absolute paths to protect. ClamAV DBs are

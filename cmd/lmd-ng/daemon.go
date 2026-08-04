@@ -195,6 +195,7 @@ Subcommands:
 
 			// Shut down ATP last so files stay protected until services stop.
 			if atpControl != nil {
+				protector.Done()
 				atpControl <- "shutdown"
 			}
 			wg.Wait()
@@ -462,6 +463,7 @@ Runs standalone or alongside DBS and RTP as part of 'lmd-ng daemon'.`,
 			<-ctx.Done()
 
 			log.Info("LMD-NG ATP shutting down...")
+			protector.Done()
 			if controlCh != nil {
 				controlCh <- "shutdown"
 			}

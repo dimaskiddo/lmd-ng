@@ -137,18 +137,40 @@ func runStatus(cmd *cobra.Command, args []string) {
 	}
 }
 
-// isTPProtected reports whether ATP protection is actually active by probing
-// the immutable flag on a known protected file (TLS cert, else the binary).
+// isTPProtected reports whether ATP protection is currently active. The
+// immutable flag must be set on a protected file AND the ATP process must be
+// running (PID file) — flags alone are ambiguous after a crash.
 func isTPProtected(cfg *config.Config) bool {
+	flagSet := false
 	certFile, _, _ := protocol.ServerCertPaths(cfg)
-	if certFile != "" && atp.IsImmuneSet(certFile) {
-		return true
+	if certFile != "" {
+		flagSet = atp.IsImmuneSet(certFile)
 	}
-	exe, err := os.Executable()
+	if !flagSet {
+		exe, err := os.Executable()
+		if err != nil {
+			return false
+		}
+		flagSet = atp.IsImmuneSet(exe)
+	}
+	if !flagSet {
+		return false
+	}
+
+	pidFile := filepath.Join(cfg.App.BasePath, "lmd-ng-atp.pid")
+	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return false
 	}
-	return atp.IsImmuneSet(exe)
+	pid := strings.TrimSpace(string(data))
+	if pid == "" {
+		return false
+	}
+
+	// /proc/<pid> exists iff the ATP process is alive. Avoids signaling a
+	// recycled PID.
+	_, err = os.Stat(filepath.Join("/proc", pid))
+	return err == nil
 }
 
 // printSignatureStats prints engine signature counts from DBS status data.
