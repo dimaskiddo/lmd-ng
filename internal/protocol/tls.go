@@ -104,7 +104,6 @@ func EnsureCerts(cfg *config.Config) error {
 		tlsCfg.CertsDir = certsDir
 	}
 
-	// Create certs directory if it doesn't exist
 	if err := os.MkdirAll(certsDir, 0700); err != nil {
 		return fmt.Errorf("failed to create certs directory %s: %w", certsDir, err)
 	}
@@ -116,21 +115,18 @@ func EnsureCerts(cfg *config.Config) error {
 	cliC := filepath.Join(certsDir, clientCertFile)
 	cliK := filepath.Join(certsDir, clientKeyFile)
 
-	// Check if all cert files already exist
 	allExist := fileExists(caC) && fileExists(caK) &&
 		fileExists(srvC) && fileExists(srvK) &&
 		fileExists(cliC) && fileExists(cliK)
 
 	if allExist {
 		log.Debug("TLS certificates already exist, skipping generation", "certs_dir", certsDir)
-		// Populate config paths if not set
 		setDefaultCertPaths(tlsCfg, certsDir)
 		return nil
 	}
 
 	log.Info("Auto-generating TLS certificates", "certs_dir", certsDir)
 
-	// Generate CA
 	caCertPEM, caKeyPEM, caPrivKey, err := generateCA()
 	if err != nil {
 		return fmt.Errorf("failed to generate CA: %w", err)
@@ -140,7 +136,6 @@ func EnsureCerts(cfg *config.Config) error {
 		return fmt.Errorf("failed to write CA files: %w", err)
 	}
 
-	// Parse CA cert for signing
 	caBlock, _ := pem.Decode(caCertPEM)
 	if caBlock == nil {
 		return fmt.Errorf("failed to decode generated CA certificate PEM")

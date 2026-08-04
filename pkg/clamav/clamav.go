@@ -150,14 +150,12 @@ func (db *ClamAVSignatureDB) loadCVD(filePath string) error {
 	}
 	defer file.Close()
 
-	// Read the 512-byte header
 	header := make([]byte, 512)
 	n, err := io.ReadFull(file, header)
 	if err != nil {
 		return fmt.Errorf("failed to read CVD header from %s (read %d bytes): %w", filePath, n, err)
 	}
 
-	// Parse the header
 	cvdHeader, err := parseCVDHeader(string(header))
 	if err != nil {
 		slog.Warn("Failed to parse CVD header, attempting to extract anyway", "path", filePath, "error", err)

@@ -435,7 +435,6 @@ func (c *Client) attemptScanFile(ctx context.Context, filePath string, fileSize 
 		return nil, fmt.Errorf("failed to send scan end for %s: %w", filePath, err)
 	}
 
-	// Read the scan result
 	msgType, resultPayload, err := protocol.ReadFrame(conn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read scan result for %s: %w", filePath, err)

@@ -19,11 +19,15 @@ import (
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
+	"github.com/dimaskiddo/lmd-ng/internal/util"
 )
 
 const (
 	filePerm = 0o000 // Read/write/execute denied for all
 )
+
+// ErrFileTooLarge is returned when a file exceeds the quarantine max_file_size.
+var ErrFileTooLarge = errors.New("file exceeds quarantine max_file_size")
 
 // IsQuarantineArtifact returns true if the path belongs to a quarantine temp file
 // or metadata sidecar that should be ignored by the file system monitor.
@@ -91,6 +95,15 @@ func NewQuarantineManager(cfg *config.QuarantineConfig) *QuarantineManager {
 	return &QuarantineManager{cfg: cfg}
 }
 
+// maxFileSize returns the configured quarantine file size limit in bytes.
+func (qm *QuarantineManager) maxFileSize() (int64, error) {
+	sizeStr := qm.cfg.MaxFileSize
+	if sizeStr == "" || sizeStr == "0" {
+		sizeStr = "20M"
+	}
+	return util.ParseSizeString(sizeStr)
+}
+
 // Quarantine moves a file to quarantine, captures its full POSIX metadata,
 // sets restrictive permissions, and optionally encrypts it.
 func (qm *QuarantineManager) Quarantine(ctx context.Context, filePath string, detectionInfo string, detectionEngine string) (string, error) {
@@ -109,6 +122,12 @@ func (qm *QuarantineManager) Quarantine(ctx context.Context, filePath string, de
 	info, err := os.Lstat(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to stat file %s before quarantine: %w", filePath, err)
+	}
+
+	if max, err := qm.maxFileSize(); err != nil {
+		return "", fmt.Errorf("invalid quarantine max_file_size: %w", err)
+	} else if info.Size() > max {
+		return "", fmt.Errorf("file %s is %d bytes, exceeds quarantine max_file_size (%d): %w", filePath, info.Size(), max, ErrFileTooLarge)
 	}
 
 	uid, gid, username, groupName := captureOwnership(info)
@@ -252,6 +271,17 @@ func (qm *QuarantineManager) Restore(ctx context.Context, quarantinePath string)
 	}
 
 	fileToRestorePath := quarantinePath
+
+	if max, err := qm.maxFileSize(); err != nil {
+		lockDown()
+		return "", fmt.Errorf("invalid quarantine max_file_size: %w", err)
+	} else if info, statErr := os.Stat(quarantinePath); statErr != nil {
+		lockDown()
+		return "", fmt.Errorf("failed to stat quarantined file %s: %w", quarantinePath, statErr)
+	} else if info.Size() > max {
+		lockDown()
+		return "", fmt.Errorf("quarantined file %s is %d bytes, exceeds quarantine max_file_size (%d): %w", quarantinePath, info.Size(), max, ErrFileTooLarge)
+	}
 
 	if qm.cfg.EnableEncryption && len(metadata.EncryptionKey) > 0 && len(metadata.Nonce) > 0 {
 		if qm.cfg.EncryptionKey == "" {

@@ -228,9 +228,14 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 			}
 			if n > 0 {
 				if detectMagicType(magicBuf[:n]) == magicTypePE {
-					sections, peErr := ParsePESections(r)
+					sections, peErr := ParsePESections(ctx, r)
 					if peErr == nil {
 						for _, section := range sections {
+							select {
+							case <-ctx.Done():
+								return nil, ctx.Err()
+							default:
+							}
 							if s.isPathAllowlisted(filePath) {
 								break
 							}
@@ -310,7 +315,7 @@ func (s *LMDSignatureScanner) ScanHeuristics(ctx context.Context, r io.ReadSeeke
 	}
 
 	if hexOn {
-		if matches := s.hexScanner.Check(content, filePath); len(matches) > 0 {
+		if matches := s.hexScanner.Check(ctx, content, filePath); len(matches) > 0 {
 			return []*ScanResult{{
 				SignatureName: matches[0],
 				SignatureType: "HEX",
@@ -321,7 +326,7 @@ func (s *LMDSignatureScanner) ScanHeuristics(ctx context.Context, r io.ReadSeeke
 	}
 
 	if ndbOn {
-		if matches := s.clamavScanner.NDB.Match(content, fileSize); len(matches) > 0 {
+		if matches := s.clamavScanner.NDB.Match(ctx, content, fileSize); len(matches) > 0 {
 			return []*ScanResult{{
 				SignatureName: matches[0],
 				SignatureType: "RFXN-NDB",
@@ -527,9 +532,14 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 				magicType := detectMagicType(magicBuf[:n])
 
 				if magicType == magicTypePE {
-					sections, err := ParsePESections(r)
+					sections, err := ParsePESections(ctx, r)
 					if err == nil {
 						for _, section := range sections {
+							select {
+							case <-ctx.Done():
+								return nil, ctx.Err()
+							default:
+							}
 							if entry, ok := s.db.MDB.LookupMD5(section.MD5, section.Size); ok {
 								return []*ScanResult{{
 									SignatureName: entry.Name,
@@ -606,8 +616,14 @@ func (s *ClamAVSignatureEngine) ScanHeuristics(ctx context.Context, r io.ReadSee
 	}
 
 	var results []*ScanResult
-	ndbMatches := s.db.NDB.Match(content, fileSize)
+	ndbMatches := s.db.NDB.Match(ctx, content, fileSize)
 	for _, sigName := range ndbMatches {
+		select {
+		case <-ctx.Done():
+			return results, ctx.Err()
+		default:
+		}
+
 		results = append(results, &ScanResult{
 			SignatureName: sigName,
 			SignatureType: "ClamAV-NDB",

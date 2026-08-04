@@ -82,7 +82,9 @@ Subcommands:
 			var atpControl chan string
 			protector := atp.NewProtector(cfg)
 			protector.SetAlertFunc(func(title, msg string) {
-				_ = buildMultiNotifier(cfg).SendAlert(ctx, title, msg)
+				if err := buildMultiNotifier(cfg).SendAlert(ctx, title, msg); err != nil {
+					log.Warn("Failed to send tamper alert", "error", err)
+				}
 			})
 			control, atpErr := protector.Protect(ctx)
 			if atpErr != nil {
@@ -446,7 +448,9 @@ Runs standalone or alongside DBS and RTP as part of 'lmd-ng daemon'.`,
 
 			protector := atp.NewProtector(cfg)
 			protector.SetAlertFunc(func(title, msg string) {
-				_ = buildMultiNotifier(cfg).SendAlert(ctx, title, msg)
+				if err := buildMultiNotifier(cfg).SendAlert(ctx, title, msg); err != nil {
+					log.Warn("Failed to send tamper alert", "error", err)
+				}
 			})
 			controlCh, err := protector.Protect(ctx)
 			if err != nil {

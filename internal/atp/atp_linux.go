@@ -3,6 +3,7 @@
 package atp
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"unsafe"
@@ -29,7 +30,7 @@ func (p *Protector) applyProtection(files []string) error {
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("failed to protect %d files: %w", len(errs), errs[0])
+		return fmt.Errorf("failed to protect %d files: %w", len(errs), errors.Join(errs...))
 	}
 	return nil
 }

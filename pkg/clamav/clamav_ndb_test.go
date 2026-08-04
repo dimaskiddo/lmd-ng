@@ -1,6 +1,7 @@
 package clamav
 
 import (
+	"context"
 	"testing"
 )
 
@@ -43,14 +44,14 @@ func TestNDBMatchTargetTypeFiltering(t *testing.T) {
 
 	// ELF content containing the pattern — should NOT match a PE-only sig.
 	elfContent := append([]byte{0x7F, 0x45, 0x4C, 0x46, 0x02, 0x01, 0x01, 0x00}, []byte{0xDE, 0xAD, 0xBE, 0xEF}...)
-	matches := store.Match(elfContent, int64(len(elfContent)))
+	matches := store.Match(context.Background(), elfContent, int64(len(elfContent)))
 	if len(matches) != 0 {
 		t.Errorf("PE sig should NOT match ELF binary, but got: %v", matches)
 	}
 
 	// PE content containing the pattern — SHOULD match.
 	peContent := append([]byte{0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00}, []byte{0xDE, 0xAD, 0xBE, 0xEF}...)
-	matches = store.Match(peContent, int64(len(peContent)))
+	matches = store.Match(context.Background(), peContent, int64(len(peContent)))
 	if len(matches) != 1 || matches[0] != "Win.Trojan.TestOnly" {
 		t.Errorf("PE sig should match PE binary, got: %v", matches)
 	}
@@ -58,7 +59,7 @@ func TestNDBMatchTargetTypeFiltering(t *testing.T) {
 	// Unknown-type content containing the pattern — should NOT match.
 	// We now strictly skip PE (1) signatures on unknown files because PE is robustly detectable.
 	unknownContent := append([]byte{0x89, 0x50, 0x4E, 0x47}, []byte{0xDE, 0xAD, 0xBE, 0xEF}...)
-	matches = store.Match(unknownContent, int64(len(unknownContent)))
+	matches = store.Match(context.Background(), unknownContent, int64(len(unknownContent)))
 	if len(matches) != 0 {
 		t.Errorf("PE sig should NOT match unknown-type content, got: %v", matches)
 	}

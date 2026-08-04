@@ -38,6 +38,7 @@ quarantine:
   path: "./quarantine"
   enable_encryption: true
   encryption_key: "CHANGE-THIS-TO-YOUR-SECRET-KEY"
+  max_file_size: "20M"
 
 monitor:
   paths:

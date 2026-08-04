@@ -3,6 +3,7 @@ package clamav
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -199,7 +200,7 @@ func (s *NDBStore) LoadNDB(r io.Reader, sourceName string) error {
 // 6=ELF). This method detects the actual file type from content magic bytes and
 // skips any signature whose TargetType does not match, preventing Windows-targeted
 // signatures (Win.Trojan.*) from firing on Linux ELF binaries.
-func (s *NDBStore) Match(content []byte, fileSize int64) []string {
+func (s *NDBStore) Match(ctx context.Context, content []byte, fileSize int64) []string {
 	var matches []string
 
 	// Detect the file type once for the entire buffer so signatures can be
@@ -207,6 +208,12 @@ func (s *NDBStore) Match(content []byte, fileSize int64) []string {
 	detectedType := detectFileType(content)
 
 	for _, sig := range s.Signatures {
+		select {
+		case <-ctx.Done():
+			return matches
+		default:
+		}
+
 		if sig.MinFL >= 0 && ClamAVFLevel < sig.MinFL {
 			continue
 		}
@@ -318,7 +325,7 @@ func resolveOffsetContent(content []byte, offset string, fileSize int64, minWind
 	// Structural offsets (EP, Sx) require header parsing we do not implement.
 	if strings.HasPrefix(offset, "EP") || strings.HasPrefix(offset, "S") {
 		slog.Debug("Skipping NDB signature with unresolvable structural offset",
-			"offset", offset, "reason", "PE/ELF header parsing not implemented, full-content fallback rejected")
+			"offset", offset)
 		return nil
 	}
 

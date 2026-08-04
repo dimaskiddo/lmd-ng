@@ -169,7 +169,7 @@ func (n *EmailNotifier) SendQuarantineNotification(ctx context.Context, filePath
 			return fmt.Errorf("failed to close data writer: %w", err)
 		}
 
-		c.Quit()
+		c.Quit() // best-effort: the SMTP connection closes on disconnect regardless
 	} else {
 		err := smtp.SendMail(addr, auth, n.cfg.Sender, n.cfg.Recipients, msg)
 		if err != nil {
@@ -256,7 +256,7 @@ func (n *EmailNotifier) SendAlert(ctx context.Context, title, message string) er
 		if err := w.Close(); err != nil {
 			return fmt.Errorf("failed to close data writer: %w", err)
 		}
-		c.Quit()
+		c.Quit() // best-effort: the SMTP connection closes on disconnect regardless
 	} else {
 		sendErr = smtp.SendMail(addr, auth, n.cfg.Sender, n.cfg.Recipients, msg)
 		if sendErr != nil {

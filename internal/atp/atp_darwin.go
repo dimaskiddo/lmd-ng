@@ -4,6 +4,7 @@ package atp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
@@ -33,7 +34,7 @@ func (p *Protector) applyProtection(files []string) error {
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("failed to protect %d files: %w", len(errs), errs[0])
+		return fmt.Errorf("failed to protect %d files: %w", len(errs), errors.Join(errs...))
 	}
 	return nil
 }
@@ -105,6 +106,6 @@ func (p *Protector) recheckFiles(files []string) {
 
 // startMonitor is a no-op on macOS.
 func (p *Protector) startMonitor(ctx context.Context, files []string, control <-chan string) {
-	log.Debug("ATP: macOS — no permission listener needed (SF_IMMUTABLE covers it)")
+	log.Debug("ATP: macOS monitor active")
 	<-ctx.Done()
 }

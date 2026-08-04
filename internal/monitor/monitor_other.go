@@ -153,7 +153,9 @@ func (om *otherMonitor) handleEvent(ctx context.Context, name string, op fsnotif
 		results, quarantined := om.parent.scanFunc(ctx, name)
 		if quarantined && len(results) > 0 {
 			if om.parent.notifier != nil {
+				om.parent.wg.Add(1)
 				go func() {
+					defer om.parent.wg.Done()
 					if err := om.parent.notifier.SendQuarantineNotification(ctx, name, results[0].SignatureName); err != nil {
 						log.Error("Failed to send quarantine notification", "error", err)
 					}

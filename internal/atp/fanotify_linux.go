@@ -78,7 +78,7 @@ func (p *Protector) startMonitor(ctx context.Context, files []string, control <-
 
 	fd, err := unix.FanotifyInit(unix.FAN_CLASS_PRE_CONTENT, unix.O_CLOEXEC|unix.O_NONBLOCK)
 	if err != nil {
-		log.Warn("ATP: fanotify_init failed — continuing with immutable flags only",
+		log.Warn("ATP: fanotify_init failed",
 			"error", err)
 		for {
 			select {

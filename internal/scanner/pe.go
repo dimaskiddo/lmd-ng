@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -30,7 +31,7 @@ type PESection struct {
 }
 
 // ParsePESections reads a PE file and returns section info with precomputed hashes.
-func ParsePESections(r io.ReadSeeker) ([]PESection, error) {
+func ParsePESections(ctx context.Context, r io.ReadSeeker) ([]PESection, error) {
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("failed to seek to DOS header: %w", err)
 	}
@@ -95,6 +96,12 @@ func ParsePESections(r io.ReadSeeker) ([]PESection, error) {
 
 	sections := make([]PESection, 0, numberOfSections)
 	for i := uint16(0); i < numberOfSections; i++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		sectionOffset := sectionsOffset + int64(i)*sectionHeaderSize
 		section, err := parseSectionHeader(r, sectionOffset)
 		if err != nil {
@@ -105,7 +112,13 @@ func ParsePESections(r io.ReadSeeker) ([]PESection, error) {
 	}
 
 	for i := range sections {
-		if err := hashSection(r, &sections[i]); err != nil {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		if err := hashSection(ctx, r, &sections[i]); err != nil {
 			continue
 		}
 	}
@@ -173,7 +186,7 @@ func (zeroReader) Read(p []byte) (int, error) {
 }
 
 // hashSection reads section data and computes its MD5, SHA1, and SHA256 hashes.
-func hashSection(r io.ReadSeeker, section *PESection) error {
+func hashSection(ctx context.Context, r io.ReadSeeker, section *PESection) error {
 	if section.Offset == 0 && section.Size == 0 {
 		if section.VirtualSize > 0 {
 			zeroSize := section.VirtualSize
@@ -201,13 +214,29 @@ func hashSection(r io.ReadSeeker, section *PESection) error {
 
 	multiWriter := io.MultiWriter(md5Hasher, sha1Hasher, sha256Hasher)
 
-	n, err := io.CopyN(multiWriter, r, section.Size)
-	if err != nil {
-		return fmt.Errorf("failed to read section data: %w", err)
-	}
+	buf := make([]byte, 32*1024)
+	remaining := section.Size
+	for remaining > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 
-	if n != section.Size {
-		return fmt.Errorf("short read: got %d bytes, expected %d", n, section.Size)
+		n := int64(len(buf))
+		if remaining < n {
+			n = remaining
+		}
+
+		rn, readErr := io.ReadFull(r, buf[:n])
+		if readErr != nil {
+			return fmt.Errorf("failed to read section data: %w", readErr)
+		}
+		if _, writeErr := multiWriter.Write(buf[:rn]); writeErr != nil {
+			return fmt.Errorf("failed to hash section data: %w", writeErr)
+		}
+
+		remaining -= int64(rn)
 	}
 
 	section.MD5 = hashToHex(md5Hasher)

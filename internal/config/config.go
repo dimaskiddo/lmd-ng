@@ -65,6 +65,7 @@ type QuarantineConfig struct {
 	Path             string `yaml:"path" mapstructure:"path"`
 	EnableEncryption bool   `yaml:"enable_encryption" mapstructure:"enable_encryption"`
 	EncryptionKey    string `yaml:"encryption_key" mapstructure:"encryption_key"`
+	MaxFileSize      string `yaml:"max_file_size" mapstructure:"max_file_size"`
 }
 
 // MonitorConfig holds file system monitoring settings.
@@ -230,6 +231,7 @@ func setDefaultConfig(config *Config) {
 	config.Quarantine.Path = config.App.QuarantineDir
 	config.Quarantine.EnableEncryption = true
 	config.Quarantine.EncryptionKey = "CHANGE-THIS-TO-YOUR-SECRET-KEY"
+	config.Quarantine.MaxFileSize = "20M"
 
 	switch runtime.GOOS {
 	case "linux":

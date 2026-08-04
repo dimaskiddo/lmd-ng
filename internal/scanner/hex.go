@@ -3,6 +3,7 @@ package scanner
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -296,12 +297,18 @@ func (s *hexScanner) Count() int {
 }
 
 // Check returns the names of any loaded hex signatures found in content.
-func (s *hexScanner) Check(content []byte, filePath string) []string {
+func (s *hexScanner) Check(ctx context.Context, content []byte, filePath string) []string {
 	detectedType := detectMagicType(content)
 	nativeExec := isNativeExecutable(detectedType)
 
 	var matchedSigs []string
 	for _, sig := range s.signatures {
+		select {
+		case <-ctx.Done():
+			return matchedSigs
+		default:
+		}
+
 		if nativeExec && !isUnixTargetedSig(sig.name) {
 			log.Debug("Skipping non-Unix HEX signature on native executable",
 				"signature", sig.name,

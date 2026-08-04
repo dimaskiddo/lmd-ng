@@ -61,13 +61,20 @@ func NewServer(cfg *config.Config, engines []scanner.SignatureEngine) (*Server, 
 func (s *Server) Serve(ctx context.Context) error {
 	log.Info("DBS server started, waiting for connections")
 
+	// Close the listener when ctx is cancelled.
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		<-ctx.Done()
 		s.listener.Close()
 	}()
 
-	// Periodic cleanup of stale temp files
-	go s.startTempCleanup(ctx)
+	// Periodic cleanup of stale temp files.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.startTempCleanup(ctx)
+	}()
 
 	for {
 		conn, err := s.listener.Accept()

@@ -135,7 +135,9 @@ func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fse
 		results, quarantined := dm.parent.scanFunc(ctx, path)
 		if quarantined && len(results) > 0 {
 			if dm.parent.notifier != nil {
+				dm.parent.wg.Add(1)
 				go func() {
+					defer dm.parent.wg.Done()
 					if err := dm.parent.notifier.SendQuarantineNotification(ctx, path, results[0].SignatureName); err != nil {
 						log.Error("Failed to send quarantine notification", "error", err)
 					}
