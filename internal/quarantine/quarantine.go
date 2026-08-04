@@ -283,6 +283,12 @@ func (qm *QuarantineManager) Restore(ctx context.Context, quarantinePath string)
 		return "", fmt.Errorf("quarantined file %s is %d bytes, exceeds quarantine max_file_size (%d): %w", quarantinePath, info.Size(), max, ErrFileTooLarge)
 	}
 
+	// Ensure the parent directory of the original path exists.
+	if err := os.MkdirAll(filepath.Dir(metadata.OriginalPath), 0o755); err != nil {
+		lockDown()
+		return "", fmt.Errorf("failed to recreate parent directory for %s: %w", metadata.OriginalPath, err)
+	}
+
 	if qm.cfg.EnableEncryption && len(metadata.EncryptionKey) > 0 && len(metadata.Nonce) > 0 {
 		if qm.cfg.EncryptionKey == "" {
 			lockDown()
@@ -297,23 +303,19 @@ func (qm *QuarantineManager) Restore(ctx context.Context, quarantinePath string)
 			return "", fmt.Errorf("failed to decrypt file encryption key: %w", err)
 		}
 
-		decryptedFilePath, err := qm.decryptFile(quarantinePath, fileKey, metadata.Nonce)
-
-		if err != nil {
+		// Decrypt into a temp file in the destination directory, then atomically
+		// move it over the original path.
+		decryptedTempPath := filepath.Join(filepath.Dir(metadata.OriginalPath), filepath.Base(quarantinePath)+".dec.tmp")
+		if err := qm.decryptFile(quarantinePath, decryptedTempPath, fileKey, metadata.Nonce); err != nil {
 			lockDown()
+			os.Remove(decryptedTempPath)
 			return "", fmt.Errorf("failed to decrypt quarantined file: %w", err)
 		}
 
-		fileToRestorePath = decryptedFilePath
+		fileToRestorePath = decryptedTempPath
 	}
 
-	// Ensure the parent directory of the original path exists
-	if err := os.MkdirAll(filepath.Dir(metadata.OriginalPath), 0o755); err != nil {
-		lockDown()
-		return "", fmt.Errorf("failed to recreate parent directory for %s: %w", metadata.OriginalPath, err)
-	}
-
-	// Move back to original path
+	// Move to the original path.
 	if err := moveFile(fileToRestorePath, metadata.OriginalPath); err != nil {
 		lockDown()
 		return "", fmt.Errorf("failed to move file to original path %s: %w", metadata.OriginalPath, err)
@@ -359,6 +361,126 @@ func (qm *QuarantineManager) Restore(ctx context.Context, quarantinePath string)
 	}
 
 	return metadata.OriginalPath, nil
+}
+
+// readMetadata loads the quarantine metadata sidecar for the given quarantine file.
+func readMetadata(quarantinePath string) (Metadata, error) {
+	metadataFilePath := quarantinePath + ".metadata.json"
+	f, err := os.Open(metadataFilePath)
+	if os.IsNotExist(err) {
+		return Metadata{}, fmt.Errorf("quarantine metadata file not found for %s: %w", quarantinePath, err)
+	}
+	if err != nil {
+		return Metadata{}, fmt.Errorf("failed to open quarantine metadata file %s: %w", metadataFilePath, err)
+	}
+	defer f.Close()
+
+	var metadata Metadata
+	if err := json.NewDecoder(f).Decode(&metadata); err != nil {
+		return Metadata{}, fmt.Errorf("failed to decode quarantine metadata: %w", err)
+	}
+
+	return metadata, nil
+}
+
+// ExportTo restores the quarantined file to destPath without removing it from
+// quarantine: the sample is made available for analysis while the original entry
+// (and its metadata) are preserved as evidence. The original path is preserved
+// by writing a .original-path.txt note beside the exported file.
+func (qm *QuarantineManager) ExportTo(ctx context.Context, quarantinePath, destPath string) (string, error) {
+	metadata, err := readMetadata(quarantinePath)
+	if err != nil {
+		return "", err
+	}
+
+	// Temporarily grant owner-read to open the locked file.
+	if err := os.Chmod(quarantinePath, 0o400); err != nil {
+		return "", fmt.Errorf("failed to grant read permission on quarantined file before export: %w", err)
+	}
+	lockDown := func() {
+		if chmodErr := os.Chmod(quarantinePath, filePerm); chmodErr != nil {
+			log.Warn("Failed to re-lock quarantined file after export error", "file", quarantinePath, "error", chmodErr)
+		}
+	}
+
+	if max, err := qm.maxFileSize(); err != nil {
+		lockDown()
+		return "", fmt.Errorf("invalid quarantine max_file_size: %w", err)
+	} else if info, statErr := os.Stat(quarantinePath); statErr != nil {
+		lockDown()
+		return "", fmt.Errorf("failed to stat quarantined file %s: %w", quarantinePath, statErr)
+	} else if info.Size() > max {
+		lockDown()
+		return "", fmt.Errorf("quarantined file %s is %d bytes, exceeds quarantine max_file_size (%d): %w", quarantinePath, info.Size(), max, ErrFileTooLarge)
+	}
+
+	// Ensure the destination parent directory exists.
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		lockDown()
+		return "", fmt.Errorf("failed to create destination directory for %s: %w", destPath, err)
+	}
+
+	// Decrypt into the destination path (non-destructive to the quarantine entry).
+	if qm.cfg.EnableEncryption && len(metadata.EncryptionKey) > 0 && len(metadata.Nonce) > 0 {
+		if qm.cfg.EncryptionKey == "" {
+			lockDown()
+			return "", fmt.Errorf("quarantine encryption is enabled but encryption_key is empty in config")
+		}
+
+		masterKey := deriveMasterKey(qm.cfg.EncryptionKey)
+		fileKey, err := qm.decryptKeyWithMaster(metadata.EncryptionKey, masterKey)
+		if err != nil {
+			lockDown()
+			return "", fmt.Errorf("failed to decrypt file encryption key: %w", err)
+		}
+
+		if err := qm.decryptFile(quarantinePath, destPath, fileKey, metadata.Nonce); err != nil {
+			lockDown()
+			os.Remove(destPath)
+			return "", fmt.Errorf("failed to decrypt quarantined file: %w", err)
+		}
+	} else {
+		// Unencrypted: copy the quarantine file to the destination, leaving it intact.
+		if err := copyFile(quarantinePath, destPath); err != nil {
+			lockDown()
+			return "", fmt.Errorf("failed to copy quarantined file: %w", err)
+		}
+	}
+
+	// Restore POSIX attributes on the exported file.
+	restoreMode := os.FileMode(metadata.FileMode)
+	if restoreMode == 0 {
+		restoreMode = 0o644
+	}
+	if err := os.Chmod(destPath, restoreMode); err != nil {
+		log.Warn("Failed to restore file mode", "file", destPath, "mode", restoreMode, "error", err)
+	}
+	if metadata.UID != 0 || metadata.GID != 0 {
+		if err := applyOwnership(destPath, metadata.UID, metadata.GID); err != nil {
+			log.Warn("Failed to restore file ownership (requires root) — skipping",
+				"file", destPath, "uid", metadata.UID, "gid", metadata.GID, "error", err)
+		}
+	}
+	if !metadata.ModTime.IsZero() {
+		if err := os.Chtimes(destPath, time.Now(), metadata.ModTime); err != nil {
+			log.Warn("Failed to restore file modification time", "file", destPath, "error", err)
+		}
+	}
+
+	// Preserve the original path as a durable note beside the exported file.
+	if err := os.WriteFile(destPath+".original-path.txt", []byte(metadata.OriginalPath+"\n"), 0o600); err != nil {
+		log.Warn("Failed to write original-path note", "file", destPath+".original-path.txt", "error", err)
+	}
+
+	// Re-lock the quarantined file; the export keeps it in quarantine.
+	lockDown()
+
+	log.Info("File exported for analysis",
+		"quarantine_path", quarantinePath,
+		"exported_to", destPath,
+		"original_path", metadata.OriginalPath)
+
+	return destPath, nil
 }
 
 // List returns a summary of all quarantined files.
@@ -569,62 +691,53 @@ func (qm *QuarantineManager) encryptFile(filePath string, key []byte) (string, [
 	return encryptedTempFilePath, nonce, nil
 }
 
-func (qm *QuarantineManager) decryptFile(filePath string, key []byte, nonce []byte) (string, error) {
+// decryptFile decrypts the file at filePath into destPath. The source file is
+// left intact so it can remain in quarantine when restoring elsewhere.
+func (qm *QuarantineManager) decryptFile(filePath, destPath string, key []byte, nonce []byte) error {
 	ciphertextFile, err := os.Open(filePath)
 	if err != nil {
-		return "", fmt.Errorf("failed to open ciphertext file %s: %w", filePath, err)
+		return fmt.Errorf("failed to open ciphertext file %s: %w", filePath, err)
 	}
 	defer ciphertextFile.Close()
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", fmt.Errorf("failed to create AES cipher: %w", err)
+		return fmt.Errorf("failed to create AES cipher: %w", err)
 	}
 
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", fmt.Errorf("failed to create GCM: %w", err)
+		return fmt.Errorf("failed to create GCM: %w", err)
 	}
 
 	if len(nonce) != gcm.NonceSize() {
-		return "", fmt.Errorf("invalid nonce size: expected %d, got %d", gcm.NonceSize(), len(nonce))
+		return fmt.Errorf("invalid nonce size: expected %d, got %d", gcm.NonceSize(), len(nonce))
 	}
 
-	decryptedTempFilePath := filePath + ".dec.tmp"
-	plaintextFile, err := os.Create(decryptedTempFilePath)
+	plaintextFile, err := os.Create(destPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to create plaintext file: %w", err)
+		return fmt.Errorf("failed to create plaintext file %s: %w", destPath, err)
 	}
 	defer plaintextFile.Close()
 
 	ciphertext, err := io.ReadAll(ciphertextFile)
 	if err != nil {
-		if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {
-			log.Debug("Failed to remove decrypted temp file during read error cleanup", "file", decryptedTempFilePath, "error", removeErr)
-		}
-		return "", fmt.Errorf("failed to read ciphertext file: %w", err)
+		os.Remove(destPath)
+		return fmt.Errorf("failed to read ciphertext file: %w", err)
 	}
 
 	opened, openErr := gcm.Open(nil, nonce, ciphertext, nil)
 	if openErr != nil {
-		if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {
-			log.Debug("Failed to remove decrypted temp file during decrypt error cleanup", "file", decryptedTempFilePath, "error", removeErr)
-		}
-		return "", fmt.Errorf("failed to decrypt file: %w", openErr)
+		os.Remove(destPath)
+		return fmt.Errorf("failed to decrypt file: %w", openErr)
 	}
 
 	if _, writeErr := plaintextFile.Write(opened); writeErr != nil {
-		if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {
-			log.Debug("Failed to remove decrypted temp file during write error cleanup", "file", decryptedTempFilePath, "error", removeErr)
-		}
-		return "", fmt.Errorf("failed to write decrypted data: %w", writeErr)
+		os.Remove(destPath)
+		return fmt.Errorf("failed to write decrypted data: %w", writeErr)
 	}
 
-	if err := os.Remove(filePath); err != nil {
-		log.Warn("Failed to remove encrypted file after decryption", "file", filePath, "error", err)
-	}
-
-	return decryptedTempFilePath, nil
+	return nil
 }
 
 func (qm *QuarantineManager) encryptKeyWithMaster(fileKey, masterKey []byte) ([]byte, error) {
@@ -728,6 +841,39 @@ func moveFile(src, dst string) error {
 	}
 
 	return nil
+}
+
+// copyFile copies src to dst without removing the source, preserving the source
+// file mode. Used where the original file must be left intact (e.g. export).
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open source %s: %w", src, err)
+	}
+	defer srcFile.Close()
+
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat source %s: %w", src, err)
+	}
+
+	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode())
+	if err != nil {
+		return fmt.Errorf("failed to create destination %s: %w", dst, err)
+	}
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		dstFile.Close()
+		os.Remove(dst)
+		return fmt.Errorf("failed to copy %s to %s: %w", src, dst, err)
+	}
+
+	if err := dstFile.Sync(); err != nil {
+		dstFile.Close()
+		os.Remove(dst)
+		return fmt.Errorf("failed to sync destination %s: %w", dst, err)
+	}
+	return dstFile.Close()
 }
 
 // deriveMasterKey converts a passphrase to a 32-byte AES-256 key via SHA-256.

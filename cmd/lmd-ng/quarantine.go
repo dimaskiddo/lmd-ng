@@ -147,10 +147,17 @@ func quarantineAddCmd() *cobra.Command {
 //   - A full 32-char hex quarantine ID.
 //   - A short ID prefix (≥ 4 chars) shown in `quarantine list`.
 func quarantineRestoreCmd() *cobra.Command {
-	return &cobra.Command{
+	var toPath string
+
+	cmd := &cobra.Command{
 		Use:   "restore <id|path>",
-		Short: "Restore a quarantined file to its original location",
-		Long: `Restore a quarantined file back to its original path.
+		Short: "Restore a quarantined file",
+		Long: `Restore a quarantined file.
+
+Without --to, the file is restored to its original path and removed from
+quarantine. With --to <path>, the file is decrypted to the given custom path for
+analysis but REMAINS in quarantine (evidence preserved); the original path is
+written to <path>.original-path.txt so it is not lost.
 
 The argument can be:
   - A short ID (shown in 'quarantine list', minimum 4 chars)
@@ -173,6 +180,21 @@ The argument can be:
 				os.Exit(1)
 			}
 
+			if toPath != "" {
+				destPath, err := qm.ExportTo(ctx, quarantinePath, toPath)
+				if err != nil {
+					log.Error("Failed to export quarantined file", "quarantine_path", quarantinePath, "error", err)
+					os.Exit(1)
+				}
+				fmt.Fprintf(os.Stderr,
+					"Exported quarantined file to %s.\n"+
+						"The file REMAINS in quarantine (evidence preserved).\n"+
+						"Original path recorded in %s.original-path.txt\n",
+					destPath, destPath)
+				log.Info("File exported for analysis", "exported_to", destPath, "quarantine_path", quarantinePath)
+				return
+			}
+
 			originalPath, err := qm.Restore(ctx, quarantinePath)
 			if err != nil {
 				log.Error("Failed to restore quarantined file", "quarantine_path", quarantinePath, "error", err)
@@ -182,6 +204,10 @@ The argument can be:
 			log.Info("File restored successfully", "restored_to", originalPath)
 		},
 	}
+
+	cmd.Flags().StringVar(&toPath, "to", "", "Restore to a custom path instead of the original (keeps the file in quarantine for evidence)")
+
+	return cmd
 }
 
 // quarantineRemoveCmd returns the `quarantine remove <id|path>` subcommand.
