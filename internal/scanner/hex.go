@@ -15,13 +15,13 @@ import (
 
 // hexSignatureEntry represents a single hex pattern signature.
 type hexSignatureEntry struct {
-	pattern       []byte // Hex pattern decoded to bytes (wildcard positions = 0x00)
-	fixed         bool   // True if no wildcards — fast bytes.Contains path
-	hasWildcards  bool   // True if pattern contains ?? wildcards
-	wildcardPos   []int  // Byte offsets in pattern where ?? appears (0 = any byte)
-	wildcardCount int    // Number of ?? wildcards
-	patternStr    string // Original hex string for regex fallback
-	name          string // Name of the signature
+	pattern       []byte
+	fixed         bool
+	hasWildcards  bool
+	wildcardPos   []int
+	wildcardCount int
+	patternStr    string
+	name          string
 }
 
 // hexScanner is responsible for loading and checking hex signatures.
@@ -32,8 +32,6 @@ type hexScanner struct {
 // newHexScanner creates and initializes a new hex scanner.
 func newHexScanner(cfg *config.Config) (*hexScanner, error) {
 	s := &hexScanner{
-		// Pre-allocate with reasonable initial capacity; no hard limit —
-		// append() grows the slice unboundedly for large signature sets.
 		signatures: make([]hexSignatureEntry, 0, 50000),
 	}
 
@@ -52,7 +50,6 @@ func newHexScanner(cfg *config.Config) (*hexScanner, error) {
 		log.Warn("Failed to read dat signatures directory", "dir", datDir, "error", err)
 	}
 
-	// Load custom user hex signatures if they exist
 	customSigPath := filepath.Join(cfg.App.SignaturesDir, "custom.hex")
 	if err := s.loadSignatures(customSigPath); err != nil {
 		if os.IsNotExist(err) {
@@ -66,16 +63,10 @@ func newHexScanner(cfg *config.Config) (*hexScanner, error) {
 }
 
 // loadSignatures reads a signature file and populates the internal slice.
-// Supports two formats:
-//   - Maldet: s^hex_string^signature_name^threat_level (caret-delimited)
-//   - Legacy: hex_string:signature_name (colon-delimited)
-//
-// Hex patterns support the following wildcard syntax:
-//   - "??": match any single byte (wildcard nibble pair)
+// Supports Maldet caret (s^hex^name^level) and legacy colon (hex:name) formats.
 func (s *hexScanner) loadSignatures(filePath string) error {
 	file, err := os.Open(filePath)
 	if err != nil {
-		// If the file doesn't exist, it's not an error, just means no signatures to load
 		if os.IsNotExist(err) {
 			log.Info("HEX signature file not found, skipping load", "file", filePath)
 			return nil
@@ -85,8 +76,6 @@ func (s *hexScanner) loadSignatures(filePath string) error {
 	}
 	defer file.Close()
 
-	// Buffer: initial 64KB, max 1MB per line. This limits individual line
-	// length, NOT the total number of signatures — all lines are still read.
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
@@ -99,7 +88,6 @@ func (s *hexScanner) loadSignatures(filePath string) error {
 
 		var patternHex, sigName string
 
-		// Support Maldet caret format: s^hex^name^level
 		if strings.HasPrefix(line, "s^") {
 			parts := strings.SplitN(line[2:], "^", 3)
 			if len(parts) < 2 {
@@ -109,9 +97,7 @@ func (s *hexScanner) loadSignatures(filePath string) error {
 
 			patternHex = strings.TrimSpace(parts[0])
 			sigName = strings.TrimSpace(parts[1])
-			// parts[2] = threat_level — parsed but unused (matches Maldet behavior)
 		} else {
-			// Legacy colon format: hex:name
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) < 2 {
 				log.Debug("Invalid HEX signature format (colon)", "line", line, "file", filePath)
@@ -128,8 +114,6 @@ func (s *hexScanner) loadSignatures(filePath string) error {
 			continue
 		}
 
-		// Reject signatures with fewer than 4 static bytes — too short to be
-		// specific, high false positive risk across unrelated files.
 		if !sig.fixed {
 			staticBytes := len(sig.pattern) - len(sig.wildcardPos)
 			if staticBytes < 4 {
@@ -151,19 +135,17 @@ func (s *hexScanner) loadSignatures(filePath string) error {
 	return nil
 }
 
-// compileHexSignature decodes a hex pattern string (potentially with ?? wildcards)
-// into a hexSignatureEntry with wildcard position tracking.
+// compileHexSignature decodes a hex pattern (with optional ?? wildcards) into
+// a hexSignatureEntry.
 func compileHexSignature(patternHex, name string) (*hexSignatureEntry, error) {
 	if len(patternHex) == 0 {
 		return nil, fmt.Errorf("empty hex pattern")
 	}
 
-	// Must have even number of characters for valid hex
 	if len(patternHex)%2 != 0 {
 		return nil, fmt.Errorf("odd-length hex pattern")
 	}
 
-	// Check if any wildcard nibbles exist
 	hasWildcards := false
 	for i := 0; i < len(patternHex); i++ {
 		if patternHex[i] == '?' {
@@ -173,7 +155,6 @@ func compileHexSignature(patternHex, name string) (*hexSignatureEntry, error) {
 	}
 
 	if !hasWildcards {
-		// Simple fixed hex — use fast bytes.Contains path
 		decoded, err := hex.DecodeString(patternHex)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode hex pattern: %w", err)
@@ -188,8 +169,6 @@ func compileHexSignature(patternHex, name string) (*hexSignatureEntry, error) {
 		}, nil
 	}
 
-	// Pattern has wildcards — decode fixed bytes and record wildcard positions.
-	// Each hex pair (2 chars) represents one byte. "?? = any byte at that position.
 	pattern := make([]byte, len(patternHex)/2)
 	var wildcardPos []int
 	hasComplexWildcards := false
@@ -200,14 +179,11 @@ func compileHexSignature(patternHex, name string) (*hexSignatureEntry, error) {
 		low := patternHex[i+1]
 
 		if high == '?' && low == '?' {
-			pattern[byteIdx] = 0x00 // placeholder — any byte matches
+			pattern[byteIdx] = 0x00
 			wildcardPos = append(wildcardPos, byteIdx)
 		} else if high == '?' || low == '?' {
-			// Nibble wildcard (a? or ?a) — not supported in LMD hex path
-			// These patterns belong in RFXN NDB which has full nibble support
 			hasComplexWildcards = true
 		} else if high == '*' || low == '*' {
-			// Unbounded wildcard — not supported in LMD hex path
 			hasComplexWildcards = true
 		} else {
 			v, err := hex.DecodeString(string([]byte{high, low}))
@@ -223,7 +199,6 @@ func compileHexSignature(patternHex, name string) (*hexSignatureEntry, error) {
 		return nil, fmt.Errorf("complex wildcards (nibble, *, {}) not supported in LMD hex — use RFXN NDB")
 	}
 
-	// Reject all-wildcard patterns — they match everything (high false positive risk)
 	if len(wildcardPos) == len(pattern) {
 		return nil, fmt.Errorf("pattern has no fixed bytes (all wildcards)")
 	}
@@ -239,15 +214,12 @@ func compileHexSignature(patternHex, name string) (*hexSignatureEntry, error) {
 	}, nil
 }
 
-// hexWildcardMatch checks if content contains the pattern, allowing ?? bytes
-// at wildcard positions. Uses a sliding-window scan of fixed segments.
+// hexWildcardMatch reports whether content contains the pattern, allowing any
+// byte at wildcard positions.
 func hexWildcardMatch(content []byte, sig *hexSignatureEntry) bool {
-	// Split pattern into fixed segments at wildcard boundaries.
-	// A pattern like "dead??beef" becomes segments: [dead, beef]
-	// with wildcardCount=1 and wildcardPos=[2].
 	type segment struct {
 		data   []byte
-		offset int // byte offset in original pattern
+		offset int
 	}
 
 	var segments []segment
@@ -281,17 +253,14 @@ func hexWildcardMatch(content []byte, sig *hexSignatureEntry) bool {
 		segments = append(segments, segment{data: sig.pattern[segStart:], offset: segStart})
 	}
 
-	// No fixed segments — ?? pattern matches everything
 	if len(segments) == 0 {
 		return true
 	}
 
-	// Find the first fixed segment to anchor the search
 	firstSeg := segments[0]
 	startPos := 0
 
 	for {
-		// Find next occurrence of first segment in content
 		idx := bytes.Index(content[startPos:], firstSeg.data)
 		if idx < 0 {
 			return false
@@ -300,7 +269,6 @@ func hexWildcardMatch(content []byte, sig *hexSignatureEntry) bool {
 		matchStart := startPos + idx
 		fullMatch := true
 
-		// Verify subsequent segments at their expected positions
 		for _, seg := range segments[1:] {
 			expectedPos := matchStart + seg.offset
 			if expectedPos+len(seg.data) > len(content) {
@@ -318,7 +286,6 @@ func hexWildcardMatch(content []byte, sig *hexSignatureEntry) bool {
 			return true
 		}
 
-		// Move past current match position and try next occurrence
 		startPos = matchStart + 1
 	}
 }
@@ -328,23 +295,13 @@ func (s *hexScanner) Count() int {
 	return len(s.signatures)
 }
 
-// Check searches the given content for any loaded hex signatures and returns their names.
-//
-// False-positive guard: if the file's content begins with a native-executable
-// magic header (ELF or Mach-O), any signature whose name does NOT start with
-// a known Unix-targeted prefix (e.g. "Unix.", "Linux.") is skipped. This
-// prevents Windows-specific hex patterns from matching against Linux shared
-// libraries or macOS dylibs. LMD hex.dat contains predominantly Windows
-// signatures — non-Unix-targeted sigs on a non-Windows binary are the common
-// case, not the edge.
+// Check returns the names of any loaded hex signatures found in content.
 func (s *hexScanner) Check(content []byte, filePath string) []string {
 	detectedType := detectMagicType(content)
 	nativeExec := isNativeExecutable(detectedType)
 
 	var matchedSigs []string
 	for _, sig := range s.signatures {
-		// Skip non-Unix signatures when scanning native executables (ELF/Mach-O).
-		// Only keep signatures explicitly targeting Unix/macOS platforms.
 		if nativeExec && !isUnixTargetedSig(sig.name) {
 			log.Debug("Skipping non-Unix HEX signature on native executable",
 				"signature", sig.name,
@@ -354,12 +311,10 @@ func (s *hexScanner) Check(content []byte, filePath string) []string {
 		}
 
 		if sig.fixed {
-			// Fast path: no wildcards — direct byte comparison
 			if bytes.Contains(content, sig.pattern) {
 				matchedSigs = append(matchedSigs, sig.name)
 			}
 		} else if sig.hasWildcards {
-			// Wildcard path: ??-aware matching
 			if hexWildcardMatch(content, &sig) {
 				matchedSigs = append(matchedSigs, sig.name)
 			}

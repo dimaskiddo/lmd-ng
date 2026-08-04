@@ -34,29 +34,25 @@ func IsQuarantineArtifact(path string) bool {
 		strings.HasSuffix(path, ".metadata.json")
 }
 
-// Metadata stores information about a quarantined file.
-// All POSIX file attributes needed for a bit-perfect restore are captured here.
+// Metadata stores information about a quarantined file, including the POSIX
+// attributes needed for a bit-perfect restore.
 type Metadata struct {
-	// Identity
 	OriginalPath    string `json:"original_path"`
 	QuarantinePath  string `json:"quarantine_path"`
 	DetectionInfo   string `json:"detection_info"`
 	DetectionEngine string `json:"detection_engine,omitempty"`
 
-	// POSIX file attributes — captured before the file is moved/encrypted.
-	FileMode    uint32    `json:"file_mode"`            // Full os.FileMode bits as uint32
-	FileModeStr string    `json:"file_mode_str"`        // Human-readable e.g. "-rwsr-xr-x"
-	UID         uint32    `json:"uid"`                  // Owner user ID (0 on Windows)
-	GID         uint32    `json:"gid"`                  // Owner group ID (0 on Windows)
-	Username    string    `json:"username,omitempty"`   // Resolved username (best-effort)
-	GroupName   string    `json:"group_name,omitempty"` // Resolved group name (best-effort)
-	ModTime     time.Time `json:"mod_time"`             // Original modification time
-	FileSize    int64     `json:"file_size"`            // Original file size in bytes
+	FileMode    uint32    `json:"file_mode"`
+	FileModeStr string    `json:"file_mode_str"`
+	UID         uint32    `json:"uid"`
+	GID         uint32    `json:"gid"`
+	Username    string    `json:"username,omitempty"`
+	GroupName   string    `json:"group_name,omitempty"`
+	ModTime     time.Time `json:"mod_time"`
+	FileSize    int64     `json:"file_size"`
 
-	// Quarantine event info
 	QuarantinedAt time.Time `json:"quarantined_at"`
 
-	// Crypto fields (omitempty so non-encrypted entries stay clean)
 	EncryptionKey []byte `json:"encryption_key,omitempty"`
 	Nonce         []byte `json:"nonce,omitempty"`
 }
@@ -225,9 +221,8 @@ func (qm *QuarantineManager) Quarantine(ctx context.Context, filePath string, de
 	return finalQuarantinePath, nil
 }
 
-// Restore moves a quarantined file back to its original path, decrypts it if
-// necessary, and faithfully restores all POSIX attributes: mode bits (including
-// setuid/setgid/sticky), ownership (UID/GID), and modification time.
+// Restore moves a quarantined file back to its original path, decrypting if
+// necessary and restoring POSIX attributes.
 func (qm *QuarantineManager) Restore(ctx context.Context, quarantinePath string) (string, error) {
 	metadataFilePath := quarantinePath + ".metadata.json"
 
@@ -294,9 +289,6 @@ func (qm *QuarantineManager) Restore(ctx context.Context, quarantinePath string)
 		return "", fmt.Errorf("failed to move file to original path %s: %w", metadata.OriginalPath, err)
 	}
 
-	// --- Restore POSIX attributes ---
-	// 1. Restore full mode bits (rwxrwxrwx + setuid + setgid + sticky).
-	//    Fallback to 0644 if no mode was recorded (old metadata schema).
 	restoreMode := os.FileMode(metadata.FileMode)
 	if restoreMode == 0 {
 		restoreMode = 0o644
@@ -306,7 +298,6 @@ func (qm *QuarantineManager) Restore(ctx context.Context, quarantinePath string)
 		log.Warn("Failed to restore file mode", "file", metadata.OriginalPath, "mode", restoreMode, "error", err)
 	}
 
-	// 2. Restore ownership (requires root/CAP_CHOWN; only skip, never abort).
 	if metadata.UID != 0 || metadata.GID != 0 {
 		if err := applyOwnership(metadata.OriginalPath, metadata.UID, metadata.GID); err != nil {
 			log.Warn("Failed to restore file ownership (requires root) — skipping",
@@ -317,7 +308,6 @@ func (qm *QuarantineManager) Restore(ctx context.Context, quarantinePath string)
 		}
 	}
 
-	// 3. Restore modification time (atime=now, mtime=original).
 	if !metadata.ModTime.IsZero() {
 		if err := os.Chtimes(metadata.OriginalPath, time.Now(), metadata.ModTime); err != nil {
 			log.Warn("Failed to restore file modification time", "file", metadata.OriginalPath, "error", err)
@@ -494,8 +484,6 @@ func (qm *QuarantineManager) Remove(ctx context.Context, quarantinePath string) 
 	return nil
 }
 
-// --- Encryption helpers ---
-
 func (qm *QuarantineManager) encryptFile(filePath string, key []byte) (string, []byte, error) {
 	plaintextFile, err := os.Open(filePath)
 	if err != nil {
@@ -526,8 +514,6 @@ func (qm *QuarantineManager) encryptFile(filePath string, key []byte) (string, [
 	}
 	defer ciphertextFile.Close()
 
-	// Read entire plaintext — bounded by MaxFilesize config (default 20MB).
-	// Single-pass GCM: one Seal call per file, no nonce reuse across chunks.
 	plaintext, err := io.ReadAll(plaintextFile)
 	if err != nil {
 		if removeErr := os.Remove(encryptedTempFilePath); removeErr != nil {
@@ -581,7 +567,6 @@ func (qm *QuarantineManager) decryptFile(filePath string, key []byte, nonce []by
 	}
 	defer plaintextFile.Close()
 
-	// Read entire ciphertext — bounded by quarantine file size. Single-pass GCM.
 	ciphertext, err := io.ReadAll(ciphertextFile)
 	if err != nil {
 		if removeErr := os.Remove(decryptedTempFilePath); removeErr != nil {

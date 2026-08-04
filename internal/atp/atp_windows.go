@@ -17,11 +17,10 @@ import (
 var exclusiveHandles []windows.Handle
 
 // applyProtection applies the deny-write DACL, audit SACL, and exclusive
-// handles to every protected file. ATP is mandatory — no config toggles.
+// handles to every protected file.
 func (p *Protector) applyProtection(files []string) error {
 	var errs []error
 
-	// Phase 1: Deny-write DACL (everyone denied FILE_WRITE_DATA, DELETE, ...).
 	for _, f := range files {
 		if err := setDenyWriteDACL(f); err != nil {
 			log.Warn("ATP: failed to set deny-write DACL", "file", f, "error", err)
@@ -29,15 +28,12 @@ func (p *Protector) applyProtection(files []string) error {
 		}
 	}
 
-	// Phase 2: Audit SACL for failed write/delete attempts (best-effort).
 	for _, f := range files {
 		if err := setAuditSACL(f); err != nil {
 			log.Warn("ATP: failed to set audit SACL", "file", f, "error", err)
 		}
 	}
 
-	// Phase 3: Exclusive handles — the strongest layer, holds each file open
-	// with dwShareMode=0 so even SYSTEM cannot rename/delete it.
 	for _, f := range files {
 		handle, err := holdExclusiveHandle(f)
 		if err != nil {
@@ -53,8 +49,7 @@ func (p *Protector) applyProtection(files []string) error {
 	return nil
 }
 
-// removeProtection releases all exclusive handles (the DACL/SACL are
-// persistent and do not need explicit release).
+// removeProtection releases all exclusive handles.
 func (p *Protector) removeProtection(files []string) error {
 	seen := make(map[windows.Handle]struct{}, len(exclusiveHandles))
 	for _, h := range exclusiveHandles {
@@ -69,12 +64,7 @@ func (p *Protector) removeProtection(files []string) error {
 	return nil
 }
 
-// setDenyWriteDACL adds a DENY_ACCESS ACE blocking FILE_WRITE_DATA,
-// FILE_APPEND_DATA, DELETE, WRITE_DAC, and WRITE_OWNER for Everyone.
-//
-// ponytail: SYSTEM can take ownership and rewrite the DACL via
-// SeTakeOwnershipPrivilege, so this is a speed bump — the exclusive handle
-// is the real barrier.
+// setDenyWriteDACL adds a DENY_ACCESS ACE blocking write/delete for Everyone.
 func setDenyWriteDACL(path string) error {
 	everyone, err := windows.StringToSid("S-1-1-0") // Everyone
 	if err != nil {
@@ -108,10 +98,8 @@ func setDenyWriteDACL(path string) error {
 	return nil
 }
 
-// setAuditSACL adds SYSTEM_AUDIT_ACE entries that log failed write/delete
-// attempts to the Security event log. Requires SeSecurityPrivilege.
+// setAuditSACL adds SYSTEM_AUDIT_ACE entries that log failed write/delete attempts.
 func setAuditSACL(path string) error {
-	// SeSecurityPrivilege is disabled by default even on SYSTEM; enable it.
 	if err := enablePrivilege("SeSecurityPrivilege"); err != nil {
 		log.Debug("ATP: SeSecurityPrivilege unavailable (SACL audit skipped)",
 			"error", err)
@@ -149,8 +137,7 @@ func setAuditSACL(path string) error {
 	return nil
 }
 
-// holdExclusiveHandle opens the file with dwShareMode=0, so no other process
-// can open it for read, write, or delete while the handle is open.
+// holdExclusiveHandle opens the file with dwShareMode=0, blocking other opens.
 func holdExclusiveHandle(path string) (windows.Handle, error) {
 	pathPtr, err := windows.UTF16PtrFromString(path)
 	if err != nil {
@@ -199,9 +186,7 @@ func enablePrivilege(name string) error {
 	return windows.AdjustTokenPrivileges(token, false, &tp, 0, nil, nil)
 }
 
-// recheckFiles verifies protected files still exist. DACLs are persistent on
-// Windows; the primary failure mode is deletion, which is blocked by the
-// exclusive handle but not if the handle was lost.
+// recheckFiles verifies protected files still exist.
 func (p *Protector) recheckFiles(files []string) {
 	log.Debug("ATP: Windows periodic recheck — verifying file existence", "count", len(files))
 	for _, f := range files {
@@ -211,17 +196,14 @@ func (p *Protector) recheckFiles(files []string) {
 	}
 }
 
-// isImmutableSet reports whether a protected file exists (the Windows
-// equivalent of the immutable-flag probe on Unix).
+// isImmutableSet reports whether a protected file exists.
 func isImmutableSet(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
-// startMonitor is a no-op on Windows — the DACL and exclusive handles are
-// enforced by the kernel at open time. SACL events go to the Security event
-// log, which RTP can monitor separately.
+// startMonitor is a no-op on Windows.
 func (p *Protector) startMonitor(ctx context.Context, files []string, control <-chan string) {
-	log.Debug("ATP: Windows — no permission listener needed (DACL + exclusive handle cover it)")
+	log.Debug("ATP: Windows — no permission listener needed")
 	<-ctx.Done()
 }

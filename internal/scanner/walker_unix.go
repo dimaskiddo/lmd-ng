@@ -12,10 +12,8 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/log"
 )
 
-// applyOwnerFilters checks if the given file should be skipped based on
-// owner/group configuration (ignore_root, ignore_users, ignore_groups).
-// Returns true if the file should be skipped.
-// This implementation uses syscall.Stat_t, which is only available on Unix-like systems.
+// applyOwnerFilters reports whether the file should be skipped per the
+// ignore_root / ignore_users / ignore_groups config.
 func applyOwnerFilters(path string, info os.FileInfo, cfg *config.Config) bool {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
@@ -25,13 +23,11 @@ func applyOwnerFilters(path string, info os.FileInfo, cfg *config.Config) bool {
 	uid := stat.Uid
 	gid := stat.Gid
 
-	// Ignore root if configured (UID 0 is root)
 	if cfg.Scanner.IgnoreRoot && uid == 0 {
 		log.Debug("Skipping file owned by root", "path", path)
 		return true
 	}
 
-	// Ignore specific users
 	if len(cfg.Scanner.IgnoreUsers) > 0 {
 		if u, err := user.LookupId(fmt.Sprint(uid)); err == nil {
 			for _, ignoredUser := range cfg.Scanner.IgnoreUsers {
@@ -43,7 +39,6 @@ func applyOwnerFilters(path string, info os.FileInfo, cfg *config.Config) bool {
 		}
 	}
 
-	// Ignore specific groups
 	if len(cfg.Scanner.IgnoreGroups) > 0 {
 		if g, err := user.LookupGroupId(fmt.Sprint(gid)); err == nil {
 			for _, ignoredGroup := range cfg.Scanner.IgnoreGroups {

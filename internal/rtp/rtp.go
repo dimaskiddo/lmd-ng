@@ -54,10 +54,6 @@ func NewRTP(cfg *config.Config, n notifier.Notifier) (*RTP, error) {
 		walker:        walker,
 	}
 
-	// Create the monitor with a scan callback that uses the DBS client.
-	// The callback handles:
-	//   1. Streaming the file to DBS for signature matching
-	//   2. Quarantining the file locally if malware is detected
 	mon, err := monitor.NewMonitor(cfg, rtp.scanAndAct, n)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create monitor: %w", err)
@@ -71,14 +67,12 @@ func NewRTP(cfg *config.Config, n notifier.Notifier) (*RTP, error) {
 // Start begins the Real-Time Protector. It first waits for the DBS server to
 // become available, then starts the file system monitor.
 func (r *RTP) Start(ctx context.Context) error {
-	// Wait for DBS server to be available before starting the monitor
 	if err := r.dbsClient.WaitForServer(ctx); err != nil {
 		return fmt.Errorf("failed waiting for DBS server: %w", err)
 	}
 
 	log.Info("LMD-NG Real-Time Protector started")
 
-	// Start the Janitor to clean up the recentScans map and prevent memory leaks
 	go r.cleanupRecentScans(ctx)
 
 	return r.monitor.Start(ctx)
@@ -99,7 +93,6 @@ func (r *RTP) cleanupRecentScans(ctx context.Context) {
 			now := time.Now()
 			r.recentScans.Range(func(key, value interface{}) bool {
 				lastScanTime := value.(time.Time)
-				// Our debounce window is 500ms, so 5 seconds is more than enough time to keep it
 				if now.Sub(lastScanTime) > 5*time.Second {
 					r.recentScans.Delete(key)
 				}
@@ -116,10 +109,8 @@ func (r *RTP) Stop() error {
 	return r.monitor.Stop()
 }
 
-// scanAndAct implements the monitor.ScanFunc interface. It streams a file to
-// detected. This is called by the monitor for each file system event.
+// scanAndAct implements the monitor.ScanFunc interface. Called for each event.
 func (r *RTP) scanAndAct(ctx context.Context, filePath string) ([]*scanner.ScanResult, bool) {
-	// Debounce: check if we scanned this exact file in the last 500ms
 	if lastScanVal, ok := r.recentScans.Load(filePath); ok {
 		lastScanTime := lastScanVal.(time.Time)
 		if time.Since(lastScanTime) < 500*time.Millisecond {
@@ -130,8 +121,6 @@ func (r *RTP) scanAndAct(ctx context.Context, filePath string) ([]*scanner.ScanR
 
 	r.recentScans.Store(filePath, time.Now())
 
-	// Use Walker.ApplyFilters to respect all scanner-level exclusions
-	// (ignore_root, max_filesize, regex, etc.).
 	info, err := os.Lstat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -161,8 +150,6 @@ func (r *RTP) scanAndAct(ctx context.Context, filePath string) ([]*scanner.ScanR
 
 	quarantined := false
 
-	// Client-side quarantine: the DBS server only matches signatures,
-	// the client handles file quarantine locally.
 	if r.cfg.Quarantine.Enabled {
 		log.Info("Threat detected, quarantining file", "file", filePath, "detections", len(results))
 

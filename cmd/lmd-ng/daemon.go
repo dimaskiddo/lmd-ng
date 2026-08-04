@@ -79,7 +79,6 @@ Subcommands:
 				handleConfigReload(ctx)
 			}()
 
-			// --- Start ATP first: lock files before DBS loads signatures ---
 			var atpControl chan string
 			protector := atp.NewProtector(cfg)
 			protector.SetAlertFunc(func(title, msg string) {
@@ -94,7 +93,6 @@ Subcommands:
 				log.Info("ATP: active tamper protection enabled")
 			}
 
-			// --- Start DBS server in background ---
 			engines, err := buildEngines(cfg)
 			if err != nil {
 				log.Error("Failed to create signature engines", "error", err)
@@ -131,7 +129,6 @@ Subcommands:
 				}
 			}()
 
-			// --- Start RTP client ---
 			var notifiers []notifier.Notifier
 			if cfg.Notification.Email.Enabled {
 				notifiers = append(notifiers, notifier.NewEmailNotifier(&cfg.Notification.Email))

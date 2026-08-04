@@ -21,7 +21,7 @@ type Walker struct {
 	parsedMaxFilesize int64
 	includeRegex      *regexp.Regexp
 	excludeRegex      *regexp.Regexp
-	scanIgnore        []string // normalized glob patterns for file exclusion
+	scanIgnore        []string
 }
 
 // NewWalker creates a new file system walker with the given configuration.
@@ -30,7 +30,6 @@ func NewWalker(cfg *config.Config) (*Walker, error) {
 		cfg: cfg,
 	}
 
-	// Parse MaxFilesize string
 	if cfg.Scanner.MaxFilesize != "0" && cfg.Scanner.MaxFilesize != "" {
 		size, err := util.ParseSizeString(cfg.Scanner.MaxFilesize)
 		if err != nil {
@@ -40,7 +39,6 @@ func NewWalker(cfg *config.Config) (*Walker, error) {
 		w.parsedMaxFilesize = size
 	}
 
-	// Compile include and exclude regexes
 	if cfg.Scanner.IncludeRegex != "" {
 		r, err := regexp.Compile(cfg.Scanner.IncludeRegex)
 		if err != nil {
@@ -59,15 +57,12 @@ func NewWalker(cfg *config.Config) (*Walker, error) {
 		w.excludeRegex = r
 	}
 
-	// Normalize scan_ignore_file_patterns: extension shorthand ".ext" → "*.ext"
 	w.scanIgnore = normalizeScanIgnorePatterns(cfg.Scanner.ScanIgnoreFilePatterns)
 
 	return w, nil
 }
 
-// normalizeScanIgnorePatterns expands extension shorthand patterns into
-// full globs. Bare extensions like ".log" become "*.log". Patterns that
-// already contain glob characters are passed through unchanged.
+// normalizeScanIgnorePatterns expands bare extensions (".log") into globs ("*.log").
 func normalizeScanIgnorePatterns(patterns []string) []string {
 	if len(patterns) == 0 {
 		return nil
@@ -80,7 +75,6 @@ func normalizeScanIgnorePatterns(patterns []string) []string {
 			continue
 		}
 
-		// Bare extension: starts with "." and contains no glob chars
 		if strings.HasPrefix(p, ".") && !strings.ContainsAny(p, "*?[\\") {
 			result = append(result, "*"+p)
 		} else {
@@ -94,17 +88,14 @@ func normalizeScanIgnorePatterns(patterns []string) []string {
 	return result
 }
 
-// Walk traverses the file system from the given root and calls the provided function for each matching file.
-// If root is a regular file, it applies filters and calls fn directly for that file.
+// Walk traverses root and calls fn for each matching file. A regular-file root
+// is filtered and passed directly to fn.
 func (w *Walker) Walk(ctx context.Context, root string, fn func(path string, info os.FileInfo) error) error {
-	// Try to evaluate any symlinks in the root path so that if a symlink is passed
-	// (either to a file or a directory), we operate on its true target.
 	evalRoot, err := filepath.EvalSymlinks(root)
 	if err == nil {
 		root = evalRoot
 	}
 
-	// Check if root is a file (not a directory)
 	rootInfo, err := os.Lstat(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -115,7 +106,6 @@ func (w *Walker) Walk(ctx context.Context, root string, fn func(path string, inf
 		return fmt.Errorf("failed to stat scan target %s: %w", root, err)
 	}
 
-	// If root is a regular file, apply filters and scan it directly
 	if rootInfo.Mode().IsRegular() || rootInfo.Mode()&fs.ModeSymlink != 0 {
 		return w.ApplyFilters(ctx, root, rootInfo, fn)
 	}
@@ -128,14 +118,13 @@ func (w *Walker) Walk(ctx context.Context, root string, fn func(path string, inf
 		}
 
 		if err != nil {
-			// Log permission errors at debug level, others at warn.
 			if os.IsPermission(err) {
 				log.Debug("Permission denied during file traversal", "path", path, "error", err)
 			} else {
 				log.Warn("Error during file traversal", "path", path, "error", err)
 			}
 
-			return nil // Continue traversal for other files/directories
+			return nil
 		}
 
 		info, err := d.Info()
@@ -145,19 +134,17 @@ func (w *Walker) Walk(ctx context.Context, root string, fn func(path string, inf
 		}
 
 		if d.IsDir() {
-			// Check depth for directories
 			depth, err := getPathDepth(root, path)
 			if err != nil {
 				log.Error("Failed to get path depth", "root", root, "path", path, "error", err)
-				return nil // Continue on error
+				return nil
 			}
 
 			if w.cfg.Scanner.MaxDepth > 0 && depth >= w.cfg.Scanner.MaxDepth {
 				log.Debug("Skipping directory due to max depth", "path", path, "depth", depth, "max_depth", w.cfg.Scanner.MaxDepth)
-				return filepath.SkipDir // Skip this directory and its children
+				return filepath.SkipDir
 			}
 
-			// Check if directory is in exclude_dirs
 			if util.IsPathExcluded(path, w.cfg.Monitor.ExcludeDirs) {
 				log.Debug("Skipping directory due to exclude_dirs", "path", path)
 				return filepath.SkipDir
@@ -170,8 +157,8 @@ func (w *Walker) Walk(ctx context.Context, root string, fn func(path string, inf
 	})
 }
 
-// getPathDepth calculates the depth of a given path relative to a root path.
-// e.g., root=/a, path=/a/b/c -> depth=2
+// getPathDepth calculates the depth of path relative to root (e.g. root=/a,
+// path=/a/b/c -> depth=2).
 func getPathDepth(root, path string) (int, error) {
 	relPath, err := filepath.Rel(root, path)
 	if err != nil {
@@ -182,13 +169,10 @@ func getPathDepth(root, path string) (int, error) {
 		return 0, nil
 	}
 
-	// Count path separators
 	return strings.Count(relPath, string(filepath.Separator)), nil
 }
 
-// ApplyFilters handles scanning a single file target, applying all configured
-// filters (filesize, user/group ignore, regex, and symlink resolution) before
-// calling the scan callback.
+// ApplyFilters applies all configured filters to a single file before calling fn.
 func (w *Walker) ApplyFilters(ctx context.Context, path string, info os.FileInfo, fn func(string, os.FileInfo) error) error {
 	select {
 	case <-ctx.Done():
@@ -196,7 +180,6 @@ func (w *Walker) ApplyFilters(ctx context.Context, path string, info os.FileInfo
 	default:
 	}
 
-	// If it is a symlink, resolve it to get its true type and size
 	if info.Mode()&fs.ModeSymlink != 0 {
 		resolved, err := util.ResolveSymlink(path, w.cfg.Scanner.MaxSymlinkDepth)
 		if err != nil {
@@ -212,13 +195,11 @@ func (w *Walker) ApplyFilters(ctx context.Context, path string, info os.FileInfo
 		path = resolved
 	}
 
-	// If it's not a regular file, skip it (e.g., devices, sockets, or symlinks to directories)
 	if !info.Mode().IsRegular() {
 		log.Debug("Skipping non-regular file", "path", path, "mode", info.Mode())
 		return nil
 	}
 
-	// Apply file size filters
 	if info.Size() < w.cfg.Scanner.MinFilesize {
 		log.Debug("Skipping file due to min_filesize", "path", path, "size", info.Size(), "min_filesize", w.cfg.Scanner.MinFilesize)
 		return nil
@@ -229,12 +210,10 @@ func (w *Walker) ApplyFilters(ctx context.Context, path string, info os.FileInfo
 		return nil
 	}
 
-	// Apply ignore_root, ignore_user, ignore_group filters (Unix only; no-op on Windows)
 	if applyOwnerFilters(path, info, w.cfg) {
 		return nil
 	}
 
-	// Apply scan_ignore file pattern exclusion (filename-only matching)
 	if len(w.scanIgnore) > 0 {
 		baseName := filepath.Base(path)
 		for _, pattern := range w.scanIgnore {
@@ -245,17 +224,14 @@ func (w *Walker) ApplyFilters(ctx context.Context, path string, info os.FileInfo
 		}
 	}
 
-	// Skip orphan inodes and system temp artifacts
 	if util.IsOrphanTempFile(path, info) {
 		return nil
 	}
 
-	// Skip editor/tool lock files (Emacs, GnuPG)
 	if util.IsLockFilePath(path) {
 		return nil
 	}
 
-	// Apply regex filters
 	if w.excludeRegex != nil && w.excludeRegex.MatchString(path) {
 		log.Debug("Skipping file due to exclude_regex", "path", path, "regex", w.cfg.Scanner.ExcludeRegex)
 		return nil

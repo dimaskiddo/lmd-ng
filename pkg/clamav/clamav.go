@@ -67,7 +67,6 @@ func LoadFromDirectory(clamAVDir string) (*ClamAVSignatureDB, error) {
 		return nil, fmt.Errorf("ClamAV database directory does not exist: %s", clamAVDir)
 	}
 
-	// First, try to load CVD files (compressed containers)
 	cvdFiles := []string{"main.cvd", "daily.cvd", "bytecode.cvd"}
 	for _, cvdName := range cvdFiles {
 		cvdPath := filepath.Join(clamAVDir, cvdName)
@@ -93,7 +92,6 @@ func LoadFromDirectory(clamAVDir string) (*ClamAVSignatureDB, error) {
 		}
 	}
 
-	// Also load any flat (unpackaged) signature files directly
 	flatExtensions := map[string]string{
 		".hdb": "hdb",
 		".hsb": "hsb",

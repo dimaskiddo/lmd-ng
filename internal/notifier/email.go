@@ -106,7 +106,6 @@ func (n *EmailNotifier) SendQuarantineNotification(ctx context.Context, filePath
 		return fmt.Errorf("failed to execute email template: %w", err)
 	}
 
-	// Build the email headers and MIME multipart (or just HTML)
 	mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n"
 	subject := fmt.Sprintf("Subject: [LMD-NG Alert] Malware Quarantined on %s\r\n", hostname)
 	toHeader := fmt.Sprintf("To: %s\r\n", strings.Join(n.cfg.Recipients, ","))

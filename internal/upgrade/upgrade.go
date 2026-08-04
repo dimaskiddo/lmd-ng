@@ -183,7 +183,6 @@ func (u *Upgrader) DownloadRelease(ctx context.Context, version, goos, goarch st
 	}
 	tmpFile.Close()
 
-	// --- Verify archive against checksums.txt (supply-chain integrity) ---
 	checksumURL := buildDownloadURL(version, "checksums.txt")
 	checksumsData, err := u.downloadText(ctx, checksumURL)
 	if err != nil {

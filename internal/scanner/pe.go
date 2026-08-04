@@ -12,28 +12,25 @@ import (
 )
 
 const (
-	peSignatureOffset = 0x3C // Offset in DOS header to e_lfanew
-	peSignatureSize   = 4    // "PE\0\0"
-	coffHeaderSize    = 20   // COFF header size
-	sectionHeaderSize = 40   // Each section header is 40 bytes
+	peSignatureOffset = 0x3C
+	peSignatureSize   = 4
+	coffHeaderSize    = 20
+	sectionHeaderSize = 40
 )
 
 // PESection represents a parsed PE section with its hashes.
 type PESection struct {
-	Name        string // Section name (e.g., ".text", ".data")
-	Size        int64  // Raw data size (SizeOfRawData)
-	Offset      int64  // File offset to section data (PointerToRawData)
-	VirtualSize int64  // Virtual memory size (used for zero-fill when SizeOfRawData==0)
-	MD5         string // MD5 hash of section data
-	SHA1        string // SHA1 hash of section data
-	SHA256      string // SHA256 hash of section data
+	Name        string
+	Size        int64
+	Offset      int64
+	VirtualSize int64
+	MD5         string
+	SHA1        string
+	SHA256      string
 }
 
-// ParsePESections reads a PE file from the given reader and returns section
-// information with precomputed hashes. The reader must support seeking.
-// Returns an error if the file is not a valid PE or is too small.
+// ParsePESections reads a PE file and returns section info with precomputed hashes.
 func ParsePESections(r io.ReadSeeker) ([]PESection, error) {
-	// Read DOS header to get e_lfanew (PE signature offset)
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("failed to seek to DOS header: %w", err)
 	}
@@ -47,12 +44,10 @@ func ParsePESections(r io.ReadSeeker) ([]PESection, error) {
 		return nil, fmt.Errorf("failed to read e_lfanew: %w", err)
 	}
 
-	// Validate PE signature offset
 	if e_lfanew < 64 || e_lfanew > 1024 {
 		return nil, fmt.Errorf("invalid PE signature offset: %d", e_lfanew)
 	}
 
-	// Read and verify PE signature ("PE\0\0")
 	if _, err := r.Seek(int64(e_lfanew), io.SeekStart); err != nil {
 		return nil, fmt.Errorf("failed to seek to PE signature: %w", err)
 	}
@@ -66,8 +61,6 @@ func ParsePESections(r io.ReadSeeker) ([]PESection, error) {
 		return nil, fmt.Errorf("invalid PE signature: %x", peSig)
 	}
 
-	// Read COFF header (20 bytes after PE signature)
-	// Machine(2) + NumberOfSections(2) + TimeDateStamp(4) + PointerToSymbolTable(4) + NumberOfSymbols(4) + SizeOfOptionalHeader(2) + Characteristics(2)
 	coffOffset := int64(e_lfanew) + peSignatureSize
 
 	var machine uint16
@@ -86,7 +79,6 @@ func ParsePESections(r io.ReadSeeker) ([]PESection, error) {
 		return nil, fmt.Errorf("failed to read number of sections: %w", err)
 	}
 
-	// Skip TimeDateStamp(4) + PointerToSymbolTable(4) + NumberOfSymbols(4)
 	if _, err := r.Seek(12, io.SeekCurrent); err != nil {
 		return nil, fmt.Errorf("failed to skip COFF fields: %w", err)
 	}
@@ -95,12 +87,10 @@ func ParsePESections(r io.ReadSeeker) ([]PESection, error) {
 		return nil, fmt.Errorf("failed to read size of optional header: %w", err)
 	}
 
-	// Validate section count
 	if numberOfSections == 0 || numberOfSections > 96 {
 		return nil, fmt.Errorf("invalid number of sections: %d", numberOfSections)
 	}
 
-	// Section headers start after COFF header + optional header
 	sectionsOffset := coffOffset + coffHeaderSize + int64(sizeOfOptionalHeader)
 
 	sections := make([]PESection, 0, numberOfSections)
@@ -114,10 +104,8 @@ func ParsePESections(r io.ReadSeeker) ([]PESection, error) {
 		sections = append(sections, section)
 	}
 
-	// Compute hashes for each section
 	for i := range sections {
 		if err := hashSection(r, &sections[i]); err != nil {
-			// Skip sections that can't be read (e.g., beyond file bounds)
 			continue
 		}
 	}
@@ -125,19 +113,17 @@ func ParsePESections(r io.ReadSeeker) ([]PESection, error) {
 	return sections, nil
 }
 
-// parseSectionHeader reads a 40-byte PE section header.
+// parseSectionHeader reads a PE section header.
 func parseSectionHeader(r io.ReadSeeker, offset int64) (PESection, error) {
 	if _, err := r.Seek(offset, io.SeekStart); err != nil {
 		return PESection{}, err
 	}
 
-	// Name: 8 bytes (null-padded)
 	var nameRaw [8]byte
 	if _, err := io.ReadFull(r, nameRaw[:]); err != nil {
 		return PESection{}, fmt.Errorf("failed to read section name: %w", err)
 	}
 
-	// VirtualSize(4) + VirtualAddress(4) + SizeOfRawData(4) + PointerToRawData(4)
 	var virtualSize uint32
 	var virtualAddress uint32
 	var sizeOfRawData uint32
@@ -159,7 +145,6 @@ func parseSectionHeader(r io.ReadSeeker, offset int64) (PESection, error) {
 		return PESection{}, fmt.Errorf("failed to read pointer to raw data: %w", err)
 	}
 
-	// Extract name (trim null bytes)
 	name := ""
 	for _, b := range nameRaw {
 		if b == 0 {
@@ -176,8 +161,8 @@ func parseSectionHeader(r io.ReadSeeker, offset int64) (PESection, error) {
 	}, nil
 }
 
-// zeroReader is an io.Reader that always returns zero bytes.
-// Used to hash PE sections with SizeOfRawData==0 (e.g., .bss).
+// zeroReader is an io.Reader that always returns zero bytes, for hashing
+// zero-filled PE sections (e.g. .bss).
 type zeroReader struct{}
 
 func (zeroReader) Read(p []byte) (int, error) {
@@ -187,14 +172,10 @@ func (zeroReader) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// hashSection reads the section data from the file and computes MD5, SHA1, and SHA256.
-// When SizeOfRawData is 0 but VirtualSize > 0 (e.g., .bss sections), hashes
-// zero-bytes up to VirtualSize — matching ClamAV C engine behavior.
+// hashSection reads section data and computes its MD5, SHA1, and SHA256 hashes.
 func hashSection(r io.ReadSeeker, section *PESection) error {
-	// No file data at all — skip
 	if section.Offset == 0 && section.Size == 0 {
 		if section.VirtualSize > 0 {
-			// .bss-like section: hash zero-bytes up to VirtualSize, capped at 128MB
 			zeroSize := section.VirtualSize
 			if zeroSize > 128*1024*1024 {
 				zeroSize = 128 * 1024 * 1024
@@ -236,8 +217,7 @@ func hashSection(r io.ReadSeeker, section *PESection) error {
 	return nil
 }
 
-// hashZeroSection hashes zero-bytes of the given size and stores the results
-// in the PESection's hash fields.
+// hashZeroSection hashes size zero-bytes and stores them in the section.
 func hashZeroSection(section *PESection, size int64) {
 	md5Hasher := md5.New()
 	sha1Hasher := sha1.New()

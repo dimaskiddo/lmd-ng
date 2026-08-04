@@ -98,13 +98,11 @@ func newUnixListener(socketPath string, backlog int, tlsConfig *tls.Config) (net
 		return nil, fmt.Errorf("failed to listen on Unix socket %s: %w", socketPath, err)
 	}
 
-	// Set socket permissions to owner-only for security
 	if err := os.Chmod(socketPath, 0600); err != nil {
 		rawLn.Close()
 		return nil, fmt.Errorf("failed to set permissions on socket %s: %w", socketPath, err)
 	}
 
-	// Wrap the Unix socket with TLS for encrypted communication
 	tlsLn := tls.NewListener(rawLn, tlsConfig)
 
 	log.Info("DBS server listening on Unix socket", "path", socketPath, "backlog", backlog)

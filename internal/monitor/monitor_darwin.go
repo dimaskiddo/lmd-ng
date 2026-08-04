@@ -44,16 +44,8 @@ func newPlatformMonitor(m *Monitor) (monitorImpl, error) {
 			continue
 		}
 
-		// Pre-create a BUFFERED Events channel. The fsnotify/fsevents library
-		// creates an unbuffered channel by default in EventStream.Start() if
-		// Events is nil. The FSEvents callback runs on a GCD serial dispatch
-		// queue and performs a blocking send (es.Events <- events). If no
-		// goroutine is reading yet when the first callback fires (highly likely
-		// on busy directories like /private/tmp or /Users), the dispatch queue
-		// thread blocks permanently — no more events are ever delivered.
-		//
-		// By pre-creating a buffered channel, early callbacks can enqueue
-		// without blocking, giving the reader goroutine time to start.
+		// Pre-create a buffered Events channel so the first FSEvents callback does
+		// not block on a full unbuffered send before the reader goroutine starts.
 		es := &fsevents.EventStream{
 			Paths:   []string{path},
 			Latency: 200 * time.Millisecond,
@@ -79,32 +71,26 @@ func (dm *darwinMonitor) isExcluded(eventPath string) bool {
 
 // handleEvent processes a single FSEvents event.
 func (dm *darwinMonitor) handleEvent(ctx context.Context, path string, flags fsevents.EventFlags) {
-	// Exclude quarantine artifacts and temp files
 	if quarantine.IsQuarantineArtifact(path) {
 		return
 	}
 
-	// Exclude DBS scan temp files — only skip files actually in our temp directory
 	scanTmpDir := filepath.Join(dm.parent.cfg.App.BasePath, "tmp")
 	if strings.HasPrefix(filepath.Base(path), "lmd-scan-") &&
 		strings.HasPrefix(path, scanTmpDir+string(filepath.Separator)) {
 		return
 	}
 
-	// Exclude #* temp-file artifacts early — path-based, stat-free (race-safe)
 	if util.IsOrphanTempPath(path) {
 		return
 	}
 
-	// Exclude editor/tool lock files (Emacs, GnuPG) — path-based, stat-free
 	if util.IsLockFilePath(path) {
 		return
 	}
 
-	// Stat early — needed for directory check AND orphan inode check
 	info, statErr := os.Lstat(path)
 
-	// Exclude orphan inodes (Nlink == 0) — needs stat
 	if statErr == nil && util.IsOrphanTempFile(path, info) {
 		return
 	}

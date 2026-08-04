@@ -11,15 +11,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// ext2IMMUTABLEFL is the FS_IMMUTABLE_FL inode flag value. It maps to the
-// `chattr +i` immutable attribute. Set directly by ioctl — no external
-// chattr binary is used.
+// ext2IMMUTABLEFL is the FS_IMMUTABLE_FL inode flag (`chattr +i`).
 const ext2IMMUTABLEFL = 0x00000010
 
-// applyProtection sets the immutable flag on every protected file. Files that
-// do not exist are skipped (they may be created later); files on filesystems
-// that do not support the immutable flag (tmpfs, NFS, etc.) are warned about
-// but do not abort protection of the remaining files.
+// applyProtection sets the immutable flag on every protected file.
 func (p *Protector) applyProtection(files []string) error {
 	var errs []error
 	for _, f := range files {
@@ -53,8 +48,7 @@ func (p *Protector) removeProtection(files []string) error {
 	return nil
 }
 
-// setImmutable sets FS_IMMUTABLE_FL on the file via the FS_IOC_SETFLAGS ioctl.
-// Pure Go syscall — no CGO, no libc.
+// setImmutable sets FS_IMMUTABLE_FL on the file via ioctl.
 func setImmutable(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -123,8 +117,7 @@ func isImmutableSet(path string) bool {
 	return flags&ext2IMMUTABLEFL != 0
 }
 
-// recheckFiles verifies each file still carries the immutable flag and
-// re-applies it if it was cleared. A cleared flag is a strong tamper signal.
+// recheckFiles re-applies the immutable flag if it was cleared.
 func (p *Protector) recheckFiles(files []string) {
 	for _, f := range files {
 		if isImmutableSet(f) {

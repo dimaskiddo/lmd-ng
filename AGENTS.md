@@ -146,6 +146,12 @@ Each daemon component has its own log file: `daemon atp/dbs/rtp --log-file` (def
 2. **No guessing** on legacy bash logic, regex, or ambiguous architecture. Pause, state ambiguity, ask.
 3. **Never auto-run pipeline.** Provide exact command + expected output, wait for user.
 4. **No system temp dirs.** Runtime files in configured paths only.
+5. **Minimal comments.** Comments describe WHY, never WHAT or HOW.
+   - No step-by-step process descriptions, algorithm blueprints, or protection-mechanism detail.
+   - No inline comments restating code (`// increment counter` on `counter++`).
+   - No section separator comments (`// --- Section ---`).
+   - Go doc comments on exported symbols: one line for simple functions, max three for complex ones.
+   - If a comment would help a malware author bypass a detection mechanism, delete it.
 
 ---
 

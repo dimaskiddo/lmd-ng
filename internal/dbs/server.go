@@ -153,9 +153,7 @@ func (s *Server) getEngines() []scanner.SignatureEngine {
 	return engines
 }
 
-// cleanOrphanTempFiles removes any leftover lmd-scan-* temp files from prior
-// crashes or unclean shutdowns. Called once at server startup before accepting
-// connections — no active scan references exist at this point.
+// cleanOrphanTempFiles removes leftover lmd-scan-* temp files at startup.
 func (s *Server) cleanOrphanTempFiles() {
 	tmpDir := filepath.Join(s.cfg.App.BasePath, "tmp")
 	entries, err := os.ReadDir(tmpDir)
@@ -187,8 +185,6 @@ func (s *Server) cleanOrphanTempFiles() {
 }
 
 // startTempCleanup periodically removes stale lmd-scan-* temp files.
-// Runs until ctx is cancelled. Catches files leaked by panics or edge cases
-// where the deferred cleanup in handleScanRequest did not execute.
 func (s *Server) startTempCleanup(ctx context.Context) {
 	const cleanupInterval = 1 * time.Minute
 	const staleThreshold = 5 * time.Minute
@@ -297,10 +293,6 @@ func (s *Server) handleScanRequest(ctx context.Context, conn net.Conn, requestPa
 
 	log.Debug("Scan request received", "file", req.FilePath, "size", req.FileSize)
 
-	// Buffer Once Mechanism:
-	// We read the entire incoming stream into a seekable buffer before passing it
-	// to the signature engines. This allows multiple engines to scan the same
-	// data stream without the first engine consuming the pipe.
 	var memoryBuffer *bytes.Buffer
 	var tempFile *os.File
 	var useTempFile bool

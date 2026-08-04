@@ -12,13 +12,10 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/log"
 )
 
-// SF_IMMUTABLE is 0x00020000 on macOS. The vendored golang.org/x/sys/unix
-// darwin const files do not export it, so it is defined here. It can only be
-// cleared in single-user mode (or with SIP disabled), which root in a normal
-// boot cannot do — making it a stronger guarantee than Linux chattr +i.
+// SF_IMMUTABLE is 0x00020000 on macOS. Not exported by vendored unix darwin consts.
 const sfImmutable = 0x00020000
 
-// sysChflags is the __NR_chflags syscall number, 34 on both amd64 and arm64 macOS.
+// sysChflags is the __NR_chflags syscall number, 34 on amd64 and arm64 macOS.
 const sysChflags = 34
 
 // applyProtection sets SF_IMMUTABLE on every protected file.
@@ -54,7 +51,6 @@ func (p *Protector) removeProtection(files []string) error {
 }
 
 // setSFImmutable sets the SF_IMMUTABLE flag via a raw chflags syscall.
-// Pure Go, no CGO. Untested on physical hardware in this environment.
 func setSFImmutable(path string) error {
 	p, err := syscall.BytePtrFromString(path)
 	if err != nil {
@@ -94,7 +90,7 @@ func isSFImmutableSet(path string) bool {
 	return uint32(st.Flags)&sfImmutable != 0
 }
 
-// recheckFiles verifies SF_IMMUTABLE is still set and re-applies it if cleared.
+// recheckFiles re-applies SF_IMMUTABLE if it was cleared.
 func (p *Protector) recheckFiles(files []string) {
 	for _, f := range files {
 		if isSFImmutableSet(f) {
@@ -107,9 +103,7 @@ func (p *Protector) recheckFiles(files []string) {
 	}
 }
 
-// startMonitor is a no-op on macOS — SF_IMMUTABLE cannot be bypassed without
-// single-user mode, so no permission listener is needed. Periodic recheck
-// catches single-user-mode tampering after reboot.
+// startMonitor is a no-op on macOS.
 func (p *Protector) startMonitor(ctx context.Context, files []string, control <-chan string) {
 	log.Debug("ATP: macOS — no permission listener needed (SF_IMMUTABLE covers it)")
 	<-ctx.Done()

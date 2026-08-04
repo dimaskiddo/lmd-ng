@@ -13,70 +13,45 @@ import (
 )
 
 // NDB TargetType constants as defined by the ClamAV signature specification.
-// See: https://docs.clamav.net/manual/Signatures/ExtendedSignatures.html
 const (
-	// NDBTargetAny matches any file type.
-	NDBTargetAny = 0
-	// NDBTargetPE matches Windows PE executables (MZ/PE magic).
-	NDBTargetPE = 1
-	// NDBTargetOLE2 matches Microsoft OLE2 compound documents (Office files, etc.).
-	NDBTargetOLE2 = 2
-	// NDBTargetHTML matches HTML files.
-	NDBTargetHTML = 3
-	// NDBTargetMail matches e-mail files.
-	NDBTargetMail = 4
-	// NDBTargetGraphics matches graphics files.
+	NDBTargetAny      = 0
+	NDBTargetPE       = 1
+	NDBTargetOLE2     = 2
+	NDBTargetHTML     = 3
+	NDBTargetMail     = 4
 	NDBTargetGraphics = 5
-	// NDBTargetELF matches ELF executables and shared libraries (Linux/Unix).
-	NDBTargetELF = 6
-	// NDBTargetASCII matches ASCII/plain-text files.
-	NDBTargetASCII = 7
-	// NDBTargetMachO matches Mach-O executables (macOS/iOS).
-	NDBTargetMachO = 9
-	// NDBTargetPDF matches PDF documents (FLEVEL >= 74, ClamAV >= 0.98.0).
-	NDBTargetPDF = 10
-	// NDBTargetFlash matches SWF/Flash files (FLEVEL >= 74, ClamAV >= 0.98.0).
-	NDBTargetFlash = 11
-	// NDBTargetJava matches Java class files (FLEVEL >= 74, ClamAV >= 0.98.0).
-	NDBTargetJava = 12
+	NDBTargetELF      = 6
+	NDBTargetASCII    = 7
+	NDBTargetMachO    = 9
+	NDBTargetPDF      = 10
+	NDBTargetFlash    = 11
+	NDBTargetJava     = 12
 )
 
 // ClamAVFLevel is the functionality level of this pure-Go engine.
-// Matches ClamAV 1.6.0 (current latest). Signatures with MinFL > this value
-// require features not implemented here and are skipped.
 const ClamAVFLevel = 240
 
 // Magic byte sequences used to detect file type for NDB TargetType filtering.
 var (
-	// magicMZ is the DOS/PE executable header ("MZ").
-	magicMZ = []byte{0x4D, 0x5A}
-	// magicELF is the ELF executable/library header ("\x7fELF").
-	magicELF = []byte{0x7F, 0x45, 0x4C, 0x46}
-	// magicOLE2 is the OLE2 compound document header.
-	magicOLE2 = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
-	// magicMachO32 is the Mach-O 32-bit little-endian magic.
-	magicMachO32 = []byte{0xCE, 0xFA, 0xED, 0xFE}
-	// magicMachO64 is the Mach-O 64-bit little-endian magic.
-	magicMachO64 = []byte{0xCF, 0xFA, 0xED, 0xFE}
-	// magicMachO32BE is the Mach-O 32-bit big-endian magic.
+	magicMZ        = []byte{0x4D, 0x5A}
+	magicELF       = []byte{0x7F, 0x45, 0x4C, 0x46}
+	magicOLE2      = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
+	magicMachO32   = []byte{0xCE, 0xFA, 0xED, 0xFE}
+	magicMachO64   = []byte{0xCF, 0xFA, 0xED, 0xFE}
 	magicMachO32BE = []byte{0xFE, 0xED, 0xFA, 0xCE}
-	// magicMachO64BE is the Mach-O 64-bit big-endian magic.
 	magicMachO64BE = []byte{0xFE, 0xED, 0xFA, 0xCF}
 )
 
-// detectFileType inspects the first bytes of content to determine the ClamAV
-// NDB TargetType. Returns NDBTargetAny (0) when the type cannot be determined.
+// detectFileType inspects the leading bytes to determine the NDB TargetType.
 func detectFileType(content []byte) int {
 	if len(content) < 2 {
 		return NDBTargetAny
 	}
 
-	// ELF: \x7fELF — must be checked before PE because some linkers embed MZ stubs.
 	if len(content) >= 4 && bytes.HasPrefix(content, magicELF) {
 		return NDBTargetELF
 	}
 
-	// Windows PE / DOS executable: MZ header.
 	if bytes.HasPrefix(content, magicMZ) {
 		return NDBTargetPE
 	}
@@ -227,14 +202,11 @@ func (s *NDBStore) LoadNDB(r io.Reader, sourceName string) error {
 func (s *NDBStore) Match(content []byte, fileSize int64) []string {
 	var matches []string
 
-	// Detect the file type once for the entire content buffer so that every
-	// signature can be filtered without re-reading magic bytes in the loop.
+	// Detect the file type once for the entire buffer so signatures can be
+	// filtered without re-reading magic bytes in the loop.
 	detectedType := detectFileType(content)
 
 	for _, sig := range s.Signatures {
-		// --- FLEVEL filter ---
-		// Skip signatures that require a higher functionality level than this engine
-		// provides, or that were superseded in newer functionality levels.
 		if sig.MinFL >= 0 && ClamAVFLevel < sig.MinFL {
 			continue
 		}
@@ -242,21 +214,12 @@ func (s *NDBStore) Match(content []byte, fileSize int64) []string {
 			continue
 		}
 
-		// --- TargetType filter ---
-		// A signature with TargetType == NDBTargetAny (0) matches all files.
 		if sig.TargetType != NDBTargetAny {
 			if detectedType != NDBTargetAny {
-				// We detected a specific file type. The signature MUST match it.
 				if sig.TargetType != detectedType {
 					continue
 				}
 			} else {
-				// We couldn't detect the file type (it's generic, like a .pb or .txt).
-				// If the signature targets a format we robustly detect (PE, ELF, Mach-O,
-				// OLE2) or can conservatively filter (PDF, Flash, Java), skip it —
-				// if the file were actually that format, we would have detected it.
-				// Formats we cannot detect (HTML, Mail, Graphics, ASCII) are allowed
-				// through: the file may genuinely be that type.
 				if sig.TargetType == NDBTargetPE ||
 					sig.TargetType == NDBTargetELF ||
 					sig.TargetType == NDBTargetMachO ||
@@ -269,8 +232,6 @@ func (s *NDBStore) Match(content []byte, fileSize int64) []string {
 			}
 		}
 
-		// Determine the slice of content to search based on offset.
-		// Use actual pattern length for fixed patterns; regex falls back to 256.
 		minWindow := 256
 		if sig.IsFixed {
 			minWindow = len(sig.FixedBytes)
@@ -282,12 +243,10 @@ func (s *NDBStore) Match(content []byte, fileSize int64) []string {
 		}
 
 		if sig.IsFixed {
-			// Fast path: direct byte comparison
 			if bytes.Contains(searchContent, sig.FixedBytes) {
 				matches = append(matches, sig.Name)
 			}
 		} else if sig.Pattern != nil {
-			// Regex path: match compiled pattern against content
 			if sig.Pattern.Match(searchContent) {
 				matches = append(matches, sig.Name)
 			}
@@ -356,11 +315,7 @@ func resolveOffsetContent(content []byte, offset string, fileSize int64, minWind
 		return content[start:]
 	}
 
-	// Handle PE/ELF specific offsets — structural offsets (EP, Sx, SE, SL) require
-	// PE/ELF header parsing. Skip these signatures rather than falling back to
-	// full-content search, which would match against unintended byte locations
-	// and cause false positives. The signature author intended a targeted match;
-	// full-content search violates that intent.
+	// Structural offsets (EP, Sx) require header parsing we do not implement.
 	if strings.HasPrefix(offset, "EP") || strings.HasPrefix(offset, "S") {
 		slog.Debug("Skipping NDB signature with unresolvable structural offset",
 			"offset", offset, "reason", "PE/ELF header parsing not implemented, full-content fallback rejected")

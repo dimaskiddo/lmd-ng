@@ -50,14 +50,13 @@ type ServerConfig struct {
 	TLS                 TLSConfig `yaml:"tls" mapstructure:"tls"`
 }
 
-// TLSConfig holds mutual TLS settings. TLS is always enabled — there is no
-// toggle. Communication between DBS server and clients is always encrypted.
+// TLSConfig holds mutual TLS settings. TLS is always enabled.
 type TLSConfig struct {
-	CertFile string `yaml:"cert_file" mapstructure:"cert_file"` // Server certificate path
-	KeyFile  string `yaml:"key_file" mapstructure:"key_file"`   // Server key path
-	CAFile   string `yaml:"ca_file" mapstructure:"ca_file"`     // CA certificate for verification
-	AutoCert bool   `yaml:"auto_cert" mapstructure:"auto_cert"` // Auto-generate self-signed certs (default: true)
-	CertsDir string `yaml:"certs_dir" mapstructure:"certs_dir"` // Directory for auto-generated certs
+	CertFile string `yaml:"cert_file" mapstructure:"cert_file"`
+	KeyFile  string `yaml:"key_file" mapstructure:"key_file"`
+	CAFile   string `yaml:"ca_file" mapstructure:"ca_file"`
+	AutoCert bool   `yaml:"auto_cert" mapstructure:"auto_cert"`
+	CertsDir string `yaml:"certs_dir" mapstructure:"certs_dir"`
 }
 
 // QuarantineConfig holds quarantine-related settings.
@@ -92,22 +91,11 @@ type ScannerConfig struct {
 	IgnoreGroups     []string `yaml:"ignore_groups" mapstructure:"ignore_groups"`
 	IncludeRegex     string   `yaml:"include_regex" mapstructure:"include_regex"`
 	ExcludeRegex     string   `yaml:"exclude_regex" mapstructure:"exclude_regex"`
-	// HashAllowlistPaths is an optional list of path prefixes under which
-	// MD5 and SHA256 hash-engine detections are suppressed. This guards
-	// against a bad signature database containing hashes of legitimate
-	// system files. Leave empty (default) to disable the allowlist and
-	// report all hash matches regardless of file location.
+	// HashAllowlistPaths lists path prefixes under which hash detections are suppressed.
 	HashAllowlistPaths []string `yaml:"hash_allowlist_paths" mapstructure:"hash_allowlist_paths"`
-	// ScanIgnoreFilePatterns is a list of glob patterns matching filenames
-	// to exclude from scanning. Inspired by Maldet's scan_ignore directive.
-	// Patterns are matched against filepath.Base(path) using filepath.Match.
-	// Extension shorthand: ".log" is auto-normalized to "*.log".
-	// If non-empty, this list replaces defaults entirely (not merged).
-	// Leave empty to use built-in AV-informed defaults.
+	// ScanIgnoreFilePatterns lists glob patterns matching filenames to exclude.
 	ScanIgnoreFilePatterns []string `yaml:"scan_ignore_file_patterns" mapstructure:"scan_ignore_file_patterns"`
 	// EnabledHeuristics controls which heuristic detection methods are active.
-	// Hash-based scanning (MD5, SHA256, HDB, MDB) is always active.
-	// Default: ["hex"]. Set to [] for hash-only mode (zero false positives).
 	EnabledHeuristics []string `yaml:"enabled_heuristics" mapstructure:"enabled_heuristics"`
 }
 
@@ -213,11 +201,6 @@ type SlackNotificationConfig struct {
 }
 
 // setDefaultConfig sets default values for the configuration.
-// NOTE: BasePath is intentionally left as "." here as a compile-time
-// placeholder. NewConfigManager always overrides BasePath with the directory
-// that contains the running binary (via os.Executable), so sub-directory
-// defaults derived from it are also immediately re-derived there. This
-// function is therefore only responsible for setting non-path defaults.
 func setDefaultConfig(config *Config) {
 	config.App.BasePath = "."
 	config.App.SignaturesDir = filepath.Join(config.App.BasePath, "sigs")
@@ -365,10 +348,7 @@ func (c *Config) ResolvePaths() {
 	resolve(&c.Scanner.ClamAVDBPath)
 }
 
-// EnsureDirectories creates all required application directories based on
-// the current configuration. This should be called once during startup to
-// guarantee the directory tree exists regardless of how the binary was
-// deployed. Directories created: logs, signatures, quarantine, and clamav.
+// EnsureDirectories creates all required application directories.
 func EnsureDirectories(cfg *Config) error {
 	dirs := []struct {
 		path string
@@ -379,7 +359,6 @@ func EnsureDirectories(cfg *Config) error {
 		{cfg.Quarantine.Path, "quarantine"},
 	}
 
-	// Add ClamAV directory only if ClamAV is enabled
 	if cfg.Scanner.ClamAVEnabled {
 		dirs = append(dirs, struct {
 			path string

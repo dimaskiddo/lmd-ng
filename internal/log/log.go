@@ -28,11 +28,7 @@ func InitLogger(cfg *Config) {
 }
 
 // InitLoggerWithPath initializes the global slog logger writing to the given
-// path with rotation. If logFilePath is empty, falls back to cfg.FilePath.
-// Rotation params (MaxSize, MaxBackups, MaxAge, Compress) come from cfg — the
-// same values are shared by every component logger, so ATP/DBS/RTP/scan logs
-// rotate with identical rules but independently (each has its own
-// lumberjack.Logger).
+// path with rotation from cfg. Falls back to cfg.FilePath when path is empty.
 func InitLoggerWithPath(logFilePath string, cfg *Config) {
 	effectivePath := logFilePath
 	if effectivePath == "" {
@@ -49,7 +45,7 @@ func InitLoggerWithPath(logFilePath string, cfg *Config) {
 			MaxAge:     cfg.MaxAge,
 			Compress:   cfg.Compress,
 		}
-		logWriter = io.MultiWriter(os.Stdout, lumberjackLogger) // Log to stdout and file
+		logWriter = io.MultiWriter(os.Stdout, lumberjackLogger)
 	} else {
 		logWriter = os.Stdout
 	}

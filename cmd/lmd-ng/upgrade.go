@@ -48,7 +48,6 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 	fmt.Println(strings.Repeat("━", 62))
 	fmt.Println()
 
-	// --- Current version ---
 	// Show commit only when both look like real SHAs (dev builds show version only)
 	commitSuffix := ""
 	if commit != "" && commit != "none" && isHexSHA(commit) {
@@ -57,7 +56,6 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 	fmt.Printf("  Current version: %s%s\n", currentVer, commitSuffix)
 	fmt.Println()
 
-	// --- Query latest version ---
 	fmt.Println("  Checking for latest version...")
 
 	u := upgrade.NewUpgrader(cfg)
@@ -81,7 +79,6 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 	fmt.Printf("  Latest version:  %s\n", latestDisplay)
 	fmt.Println()
 
-	// --- Version + commit comparison ---
 	if currentVer == latestVer && !force {
 		if sameCommit(commit, latestCommitish) {
 			fmt.Println("  Already up-to-date. Use --force to reinstall.")
@@ -103,7 +100,6 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 	fmt.Printf("  Upgrading from %s (%s) to %s%s\n", currentVer, commit, latestVer, commitNote)
 	fmt.Println()
 
-	// --- Download release ---
 	fmt.Println("  Downloading release...")
 
 	binaryPath, cleanup, err := u.DownloadRelease(ctx, latestTag, runtime.GOOS, runtime.GOARCH)
@@ -116,12 +112,10 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 	fmt.Println("  Release downloaded successfully")
 	fmt.Println()
 
-	// --- Detect services ---
 	atpInstalled := service.IsServiceInstalled(service.ComponentATP)
 	dbsInstalled := service.IsServiceInstalled(service.ComponentDBS)
 	rtpInstalled := service.IsServiceInstalled(service.ComponentRTP)
 
-	// --- Stop services (if installed) ---
 	// Order: RTP → DBS → ATP. ATP releases its file locks last so protected
 	// files stay immutable for as long as any LMD-NG service is running. It
 	// must be stopped before the binary replacement so the immutable flag on
@@ -159,7 +153,6 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 		fmt.Println()
 	}
 
-	// --- Uninstall services (after stop, before binary replace) ---
 	// Uninstall in reverse dependency order (RTP → DBS → ATP). The services
 	// are reinstalled after the binary swap so their definitions (Arguments)
 	// are refreshed to match the new binary.
@@ -193,7 +186,6 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 		fmt.Println()
 	}
 
-	// --- Replace binary ---
 	fmt.Println("  Replacing binary...")
 
 	exePath, err := os.Executable()
@@ -224,7 +216,6 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 	fmt.Println("    Binary replaced")
 	fmt.Println()
 
-	// --- Reinstall services (after binary replace, before start) ---
 	// Reinstall in dependency order (ATP → DBS → RTP) with explicit config and
 	// per-component default log paths baked into the service arguments.
 	if atpInstalled || dbsInstalled || rtpInstalled {
@@ -259,7 +250,6 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 		fmt.Println()
 	}
 
-	// --- Start services (if they were installed) ---
 	// Order: ATP → DBS → RTP. ATP locks files first, then DBS reads
 	// signatures, then RTP connects.
 	if atpInstalled || dbsInstalled || rtpInstalled {
@@ -300,7 +290,6 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 		fmt.Println()
 	}
 
-	// --- Done ---
 	backupPath := exePath + ".old"
 	fmt.Printf("  Upgrade complete: %s\n", exePath)
 	fmt.Printf("  Old binary saved: %s\n", backupPath)

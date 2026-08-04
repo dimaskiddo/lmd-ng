@@ -161,11 +161,11 @@ ATP starts FIRST to lock files before DBS loads signatures. On shutdown, ATP rel
 
 ### Platform Layers
 
-| Platform | Layer 1: Static | Layer 2: Active | Layer 3: Detection |
+| Platform | Static protection | Active blocking | Detection |
 |---|---|---|---|
-| **Linux** | `ioctl FS_IOC_SETFLAGS` sets `FS_IMMUTABLE_FL` (chattr +i equivalent, pure Go syscall) | fanotify FAN_OPEN_PERM listener denies write opens on protected inodes | inotify watcher detects chattr -i, re-applies immutable flag; periodic recheck every 5 min |
-| **macOS** | `chflags SF_IMMUTABLE` via raw syscall (pure Go) | — (cannot be bypassed without single-user mode/SIP disabled) | Periodic recheck every 5 min |
-| **Windows** | Deny-write DACL + audit SACL via `SetNamedSecurityInfo` | Exclusive file handles (dwShareMode=0) via `CreateFile` | Periodic recheck every 5 min |
+| **Linux** | `FS_IMMUTABLE_FL` inode flag (pure Go ioctl, `chattr +i` equivalent) | fanotify `FAN_OPEN_PERM` listener denies write opens on protected inodes | inotify watcher re-applies cleared flags; periodic recheck |
+| **macOS** | `chflags SF_IMMUTABLE` via raw syscall (pure Go) | — | Periodic recheck |
+| **Windows** | Deny-write DACL + audit SACL via `SetNamedSecurityInfo` | Exclusive file handles (`dwShareMode=0`) via `CreateFile` | Periodic recheck |
 
 ### Self-Upgrade
 

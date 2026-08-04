@@ -406,16 +406,7 @@ func (u *Updater) downloadText(ctx context.Context, url string) (string, error) 
 	return string(data), nil
 }
 
-// verifySignaturePackChecksum verifies the downloaded signature pack against a
-// checksum published by the upstream CDN. The checksum URL is derived from
-// signature_pack_url (append the configured suffix, default ".sha256").
-//
-// Priority:
-//  1. SignatureChecksumURL — if explicitly configured, use it verbatim.
-//  2. Derived sibling URL (SignaturePackURL + SignatureChecksumSuffix).
-//  3. If the derived URL returns 404, fall back to ".md5".
-//
-// The checksum file format is GNU checksum output: one "<hex>  <filename>" line.
+// verifySignaturePackChecksum verifies the downloaded pack against the CDN checksum.
 func (u *Updater) verifySignaturePackChecksum(ctx context.Context, packPath string) error {
 	checksumURL, expected, err := u.fetchSigpackChecksum(ctx)
 	if err != nil {
@@ -637,9 +628,7 @@ func (u *Updater) extractTarGz(archivePath, destDir string) error {
 	return nil
 }
 
-// getClamAVVersion dynamically fetches the latest ClamAV release version
-// from GitHub API to bypass the CDN restriction. Falls back to a hardcoded
-// version if the request fails or is rate-limited.
+// getClamAVVersion fetches the latest ClamAV version, falling back to a default.
 func (u *Updater) getClamAVVersion(ctx context.Context) string {
 	defaultVersion := "1.5.2"
 

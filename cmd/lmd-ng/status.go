@@ -33,7 +33,6 @@ func runStatus(cmd *cobra.Command, args []string) {
 	fmt.Println(strings.Repeat("━", 62))
 	fmt.Println()
 
-	// --- General ---
 	fmt.Printf("  %-18s %s~%s\n", "Version:", version, commit)
 	configPath := cfgMgr.Viper.ConfigFileUsed()
 	if configPath == "" {
@@ -43,7 +42,6 @@ func runStatus(cmd *cobra.Command, args []string) {
 	fmt.Printf("  %-18s %s\n", "Base Path:", cfg.App.BasePath)
 	fmt.Printf("  %-18s %s\n", "Log Level:", cfg.Logging.Level)
 
-	// --- Anti-Tamper Protection ---
 	atpStatus := "active"
 	if atp.SelfExeDeleted() {
 		atpStatus = "TAMPER DETECTED (Binary INode Replaced)"
@@ -51,7 +49,6 @@ func runStatus(cmd *cobra.Command, args []string) {
 	fmt.Printf("  %-18s %s\n", "Anti-Tamper:", atpStatus)
 	fmt.Println()
 
-	// --- Database Server ---
 	dbsAddress := dbsServerAddress(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -83,11 +80,9 @@ func runStatus(cmd *cobra.Command, args []string) {
 		fmt.Println()
 	}
 
-	// --- Version Info ---
 	printVersionInfo(cfg)
 	fmt.Println()
 
-	// --- Quarantine ---
 	qMgr := quarantine.NewQuarantineManager(&cfg.Quarantine)
 	quarantineCount := 0
 	if entries, err := qMgr.List(ctx); err != nil {
@@ -102,7 +97,6 @@ func runStatus(cmd *cobra.Command, args []string) {
 	}
 	fmt.Println()
 
-	// --- Real-Time Protector ---
 	fmt.Println("  Real-Time Protector:")
 	if len(cfg.Monitor.Paths) == 1 {
 		fmt.Printf("    %-16s 1 path (%s)\n", "Monitoring:", cfg.Monitor.Paths[0])
@@ -116,7 +110,6 @@ func runStatus(cmd *cobra.Command, args []string) {
 	}
 	fmt.Println()
 
-	// --- Scheduler ---
 	fmt.Println("  Scheduler:")
 	updateInterval := cfg.Scheduler.UpdateInterval
 	if updateInterval == "" {
@@ -131,7 +124,6 @@ func runStatus(cmd *cobra.Command, args []string) {
 	fmt.Printf("    %-16s %s\n", "Scan:", scanInterval)
 	fmt.Println()
 
-	// --- Updater ---
 	u := updater.NewUpdater(cfg)
 	lastUpdate := u.LastUpdateTime()
 	fmt.Println("  Updater:")

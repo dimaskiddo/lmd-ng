@@ -48,9 +48,8 @@ var Dependencies = map[Component][]Component{
 // required elevated privileges to install or uninstall a system service.
 var ErrInsufficientPrivilege = errors.New("insufficient privileges: service management requires root (Linux/macOS) or Administrator (Windows) access")
 
-// LMDService implements kservice.Interface. Start and Stop are intentionally
-// minimal stubs; the actual daemon logic is driven by the "lmd-ng daemon <component>"
-// subcommand that kardianos/service invokes through the Arguments field.
+// LMDService implements kservice.Interface. Actual daemon logic runs via the
+// "lmd-ng daemon <component>" subcommand invoked through Arguments.
 type LMDService struct{}
 
 // Start is called by kardianos/service when the OS service manager starts the process.
@@ -85,11 +84,8 @@ func displayName(comp Component) string {
 	}
 }
 
-// buildServiceConfig constructs the kardianos/service Config for a specific component.
-// cfgPath is the resolved config file path (empty to rely on auto-discovery).
-// logFilePath is the component's log file (defaults to the logs dir if empty).
-// These are baked into Arguments so the OS service manager always starts the
-// component with the correct --config, --log-file and --service flags.
+// buildServiceConfig constructs the kardianos/service Config, baking the
+// component's --service, --config, and --log-file flags into Arguments.
 func buildServiceConfig(exePath string, comp Component, cfgPath, logFilePath string) *kservice.Config {
 	args := []string{"daemon", string(comp), "--service"}
 	if cfgPath != "" {
@@ -107,12 +103,9 @@ func buildServiceConfig(exePath string, comp Component, cfgPath, logFilePath str
 		Arguments:        args,
 	}
 
-	// Delegate platform-specific privilege and option population.
 	applyPlatformConfig(cfg)
 
-	// ATP is the last line of defense against tampering. If it dies, protected
-	// files may become writable — so a watchdog ensures the service manager
-	// restarts it promptly rather than letting it linger in a failed state.
+	// Restart ATP promptly so protected files are never left unwatched.
 	if comp == ComponentATP {
 		if cfg.Option == nil {
 			cfg.Option = kservice.KeyValue{}
@@ -123,10 +116,7 @@ func buildServiceConfig(exePath string, comp Component, cfgPath, logFilePath str
 	return cfg
 }
 
-// UninstallLegacyService detects and removes the old monolithic "lmd-ng" service.
-// This is called automatically during `service install` to migrate from the old
-// single-service model to the new DBS/RTP split. The function is idempotent —
-// it returns nil if the legacy service doesn't exist.
+// UninstallLegacyService removes the old monolithic "lmd-ng" service. Idempotent.
 func UninstallLegacyService() error {
 	if err := checkPrivilege(); err != nil {
 		return fmt.Errorf("uninstall legacy service: %w", err)

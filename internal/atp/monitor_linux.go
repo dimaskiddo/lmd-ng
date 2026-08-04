@@ -10,17 +10,8 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// startInotifyMonitor observes protected files for tamper signals:
-//
-//   - Chmod (IN_ATTRIB on Linux): someone ran "chattr -i" to clear the
-//     immutable flag so the file can be modified.
-//   - Write / Create / Remove / Rename: direct modification, deletion, or
-//     replacement of a protected file (only observable if the file is on a
-//     filesystem where the immutable flag failed to apply, since a set +i
-//     flag normally blocks these).
-//
-// On a tamper signal it re-applies the immutable flag via recheckFiles and
-// logs; the notifier integration is wired in the daemon layer.
+// startInotifyMonitor watches protected files for tamper signals and re-applies
+// the immutable flag when cleared.
 func (p *Protector) startInotifyMonitor(ctx context.Context, files []string) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -37,10 +28,6 @@ func (p *Protector) startInotifyMonitor(ctx context.Context, files []string) {
 		}
 	}
 
-	// Note: we watch directories (not files) because inotify watch on a file is
-	// lost when the file is renamed away. Watching the parent dir captures
-	// create/write/remove/rename of the protected file within it.
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -49,14 +36,12 @@ func (p *Protector) startInotifyMonitor(ctx context.Context, files []string) {
 			if !ok {
 				return
 			}
-			// Only act on events for actual protected files.
 			if !isProtectedPath(ev.Name, files) {
 				continue
 			}
 
 			switch {
 			case ev.Op&fsnotify.Chmod != 0:
-				// chattr -i cleared the immutable flag; re-apply it.
 				log.Warn("ATP: protected file attribute change detected — re-applying immutable flag",
 					"file", ev.Name)
 				p.recheckFiles(withPath(ev.Name))
@@ -84,8 +69,7 @@ func isProtectedPath(path string, files []string) bool {
 	return false
 }
 
-// withPath returns a single-element slice of a path, for recheckFiles calls
-// scoped to the affected file.
+// withPath returns a single-element slice containing path.
 func withPath(path string) []string {
 	return []string{path}
 }

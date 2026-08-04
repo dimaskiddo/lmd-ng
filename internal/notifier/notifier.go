@@ -36,8 +36,6 @@ func (m *MultiNotifier) SendQuarantineNotification(ctx context.Context, filePath
 		return nil
 	}
 
-	// Fast internet connectivity check. If there is no internet, we silently
-	// drop the notification to avoid hanging goroutines waiting for timeouts.
 	if !util.HasInternetAccess() {
 		log.Debug("No internet connection detected, dropping notification", "file", filePath)
 		return nil
@@ -59,8 +57,6 @@ func (m *MultiNotifier) SendQuarantineNotification(ctx context.Context, filePath
 }
 
 // SendAlert broadcasts a high-priority alert to all configured notifiers.
-// If there is no internet, the alert is dropped silently (same policy as
-// quarantine notifications) to avoid hanging goroutines.
 func (m *MultiNotifier) SendAlert(ctx context.Context, title, message string) error {
 	if len(m.notifiers) == 0 {
 		return nil

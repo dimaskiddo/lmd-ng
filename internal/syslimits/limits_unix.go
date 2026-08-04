@@ -8,9 +8,8 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/log"
 )
 
-// SetMaxOpenFiles attempts to raise the maximum number of open files (RLIMIT_NOFILE)
-// to its highest possible value to prevent "too many open files" errors during
-// heavy scanning or monitoring on Unix systems (macOS, Linux).
+// SetMaxOpenFiles raises RLIMIT_NOFILE to its maximum to prevent "too many
+// open files" errors during heavy scanning on Unix systems.
 func SetMaxOpenFiles() {
 	var rLimit syscall.Rlimit
 	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit); err != nil {
@@ -18,14 +17,10 @@ func SetMaxOpenFiles() {
 		return
 	}
 
-	// Try to set the soft limit to the hard limit.
 	desired := rLimit.Max
 	rLimit.Cur = desired
 
 	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit); err != nil {
-		// On some systems (especially macOS), setting the limit to Max might fail
-		// with "invalid argument" if Max is "infinity" (e.g. INT64_MAX).
-		// We fallback to known high sensible limits.
 		fallbacks := []uint64{
 			8192000, 4096000, 2048000, 1024000,
 			819200, 409600, 204800, 102400,
@@ -35,8 +30,6 @@ func SetMaxOpenFiles() {
 
 		success := false
 		for _, fallback := range fallbacks {
-			// Don't try to set a fallback higher than the hard limit (if it's a real number)
-			// A value with the MSB set often represents infinity. We assume reasonable hard limits.
 			if rLimit.Max != 0 && rLimit.Max != 9223372036854775807 && rLimit.Max < fallback {
 				continue
 			}

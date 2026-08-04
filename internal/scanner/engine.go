@@ -20,25 +20,22 @@ import (
 
 // ScanResult represents a single detected malware match within a file.
 type ScanResult struct {
-	SignatureName string // The name of the matching signature
-	SignatureType string // The type of signature (e.g., "MD5", "HEX", "YARA")
-	FilePath      string // The path to the file where the match was found
-	DetectionID   string // A unique ID for this detection event
+	SignatureName string
+	SignatureType string
+	FilePath      string
+	DetectionID   string
 }
 
 // SignatureEngine defines the contract for malware signature matching engines.
 type SignatureEngine interface {
-	// Scan processes the provided reader and returns all detected malware matches.
-	// It should not close the reader. The reader must be a seekable stream.
+	// Scan returns all detected matches. It must not close the reader.
 	Scan(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error)
 	// Name returns the name of the signature engine.
 	Name() string
 }
 
-// HeuristicScanner is an optional interface implemented by engines that can
-// perform heuristic pattern matching (HEX, NDB). ScanHeuristics is called in a
-// SEPARATE pass after all engines complete their deterministic hash-based Scan,
-// ensuring deterministic matches always take priority over heuristic matches.
+// HeuristicScanner is an optional interface for engines that perform pattern
+// (HEX, NDB) matching in a separate pass.
 type HeuristicScanner interface {
 	ScanHeuristics(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error)
 }
@@ -105,10 +102,7 @@ func NewLMDSignatureScanner(cfg *config.Config) (*LMDSignatureScanner, error) {
 }
 
 // Scan implements the SignatureEngine interface for LMDSignatureScanner.
-// This method is hash-only — deterministic matches (zero false-positive risk).
-// Heuristic pattern matching (HEX, NDB) is in ScanHeuristics().
 func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error) {
-	// --- Hash Computation (MD5 + SHA1 + SHA256 in one pass) ---
 	md5Hasher := md5.New()
 	sha1Hasher := sha1.New()
 	sha256Hasher := sha256.New()
@@ -149,7 +143,6 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 	sha1Hash := hex.EncodeToString(sha1Hasher.Sum(nil))
 	sha256Hash := hex.EncodeToString(sha256Hasher.Sum(nil))
 
-	// --- LMD Native Hash Signatures ---
 	if sigName := s.md5Scanner.Check(md5Hash, filePath); sigName != "" {
 		return []*ScanResult{{
 			SignatureName: sigName,
@@ -168,7 +161,6 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 		}}, nil
 	}
 
-	// --- RFXN HDB Hash Signatures (Maldet core pack) ---
 	if s.clamavScanner != nil {
 		var fileSize int64 = -1
 		if file, ok := r.(*os.File); ok {
@@ -221,7 +213,6 @@ func (s *LMDSignatureScanner) Scan(ctx context.Context, r io.ReadSeeker, filePat
 		}
 	}
 
-	// --- RFXN MDB PE-Section Hash Signatures ---
 	if s.clamavScanner != nil && s.clamavScanner.MDB.TotalCount() > 0 {
 		select {
 		case <-ctx.Done():
@@ -318,7 +309,6 @@ func (s *LMDSignatureScanner) ScanHeuristics(ctx context.Context, r io.ReadSeeke
 		}
 	}
 
-	// HEX (LMD native)
 	if hexOn {
 		if matches := s.hexScanner.Check(content, filePath); len(matches) > 0 {
 			return []*ScanResult{{
@@ -330,7 +320,6 @@ func (s *LMDSignatureScanner) ScanHeuristics(ctx context.Context, r io.ReadSeeke
 		}
 	}
 
-	// NDB (RFXN)
 	if ndbOn {
 		if matches := s.clamavScanner.NDB.Match(content, fileSize); len(matches) > 0 {
 			return []*ScanResult{{
@@ -387,9 +376,8 @@ func (s *LMDSignatureScanner) RFXNCount() int {
 	return total
 }
 
-// isPathAllowlisted returns true if filePath starts with any configured
-// HashAllowlistPaths prefix. Used to suppress hash-based detections for
-// known-good system paths (e.g. /usr/bin, /usr/lib).
+// isPathAllowlisted reports whether filePath starts with a configured
+// HashAllowlistPaths prefix.
 func (s *LMDSignatureScanner) isPathAllowlisted(filePath string) bool {
 	for _, prefix := range s.cfg.Scanner.HashAllowlistPaths {
 		if strings.HasPrefix(filePath, prefix) {
@@ -399,8 +387,7 @@ func (s *LMDSignatureScanner) isPathAllowlisted(filePath string) bool {
 	return false
 }
 
-// ClamAVSignatureEngine implements the SignatureEngine interface using ClamAV
-// signature databases (.cvd, .cld, .hdb, .hsb, .ndb) loaded in pure Go.
+// ClamAVSignatureEngine matches against ClamAV signature databases.
 type ClamAVSignatureEngine struct {
 	cfg *config.Config
 	db  *clamav.ClamAVSignatureDB
@@ -444,10 +431,7 @@ func NewClamAVSignatureEngine(cfg *config.Config) (*ClamAVSignatureEngine, error
 }
 
 // Scan implements the SignatureEngine interface for ClamAVSignatureEngine.
-// This method is hash-only — deterministic matches (zero false-positive risk).
-// ClamAV NDB body-based matching is in ScanHeuristics().
 func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, filePath string) ([]*ScanResult, error) {
-	// Determine file size for hash lookups
 	var fileSize int64 = -1
 	if file, ok := r.(*os.File); ok {
 		if info, err := file.Stat(); err == nil {
@@ -459,7 +443,6 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 		}
 	}
 
-	// --- Phase 1: Hash-based detection (MD5 + SHA1 + SHA256 in one pass) ---
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("failed to seek to start for hash computation: %w", err)
 	}
@@ -500,7 +483,6 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 	sha1Hash := hex.EncodeToString(sha1Hasher.Sum(nil))
 	sha256Hash := hex.EncodeToString(sha256Hasher.Sum(nil))
 
-	// Check MD5 against HDB
 	if entry, found := s.db.HDB.LookupMD5(md5Hash, fileSize); found {
 		return []*ScanResult{{
 			SignatureName: entry.Name,
@@ -510,7 +492,6 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 		}}, nil
 	}
 
-	// Check SHA1 against HSB
 	if entry, found := s.db.HDB.LookupSHA1(sha1Hash, fileSize); found {
 		return []*ScanResult{{
 			SignatureName: entry.Name,
@@ -520,7 +501,6 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 		}}, nil
 	}
 
-	// Check SHA256 against HSB
 	if entry, found := s.db.HDB.LookupSHA256(sha256Hash, fileSize); found {
 		return []*ScanResult{{
 			SignatureName: entry.Name,
@@ -530,7 +510,6 @@ func (s *ClamAVSignatureEngine) Scan(ctx context.Context, r io.ReadSeeker, fileP
 		}}, nil
 	}
 
-	// --- Phase 2: PE section hash detection (MDB) ---
 	if s.db.MDB.TotalCount() > 0 {
 		select {
 		case <-ctx.Done():

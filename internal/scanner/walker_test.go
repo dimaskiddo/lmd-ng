@@ -9,8 +9,6 @@ import (
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 )
 
-// --- normalizeScanIgnorePatterns tests ---
-
 func TestNormalizeScanIgnorePatterns(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -90,8 +88,6 @@ func TestNormalizeScanIgnorePatterns(t *testing.T) {
 		})
 	}
 }
-
-// --- ApplyFilters scan_ignore tests ---
 
 // helperWalker creates a minimal Walker with the given scan_ignore patterns
 // for testing ApplyFilters without needing a full config setup.
