@@ -112,3 +112,54 @@ func (n *DiscordNotifier) SendQuarantineNotification(ctx context.Context, filePa
 	log.Info("Quarantine notification sent to Discord successfully")
 	return nil
 }
+
+// SendAlert sends a high-priority alert embed to a Discord channel.
+func (n *DiscordNotifier) SendAlert(ctx context.Context, title, message string) error {
+	if !n.cfg.Enabled || n.cfg.WebhookURL == "" {
+		return nil
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Debug("Failed to get hostname, using fallback", "error", err)
+		hostname = "Unknown"
+	}
+
+	payload := DiscordPayload{
+		Username: "LMD-NG Alert",
+		Embeds: []DiscordEmbed{
+			{
+				Title:       fmt.Sprintf("🔴 [ALERT] %s", title),
+				Description: fmt.Sprintf("**Host:** %s\n\n%s", hostname, message),
+				Color:       0xFF0000,
+				Footer:      &DiscordFooter{Text: "Linux Malware Detect - Next Generation"},
+				Timestamp:   time.Now().UTC().Format(time.RFC3339),
+			},
+		},
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal discord payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", n.cfg.WebhookURL, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create discord request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send discord request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("discord webhook returned status: %d", resp.StatusCode)
+	}
+
+	log.Info("Alert notification sent to Discord successfully", "title", title)
+	return nil
+}

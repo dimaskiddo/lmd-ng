@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
@@ -46,9 +47,14 @@ type commitResponse struct {
 
 // NewUpgrader creates a new Upgrader with the given configuration.
 func NewUpgrader(cfg *config.Config) *Upgrader {
+	// Bound the HTTP client so a hung GitHub/CDN connection cannot hang an upgrade.
+	timeout := 30 * time.Second
+	if d, err := time.ParseDuration(cfg.Updater.RemoteURITimeout); err == nil && d > 0 {
+		timeout = d
+	}
 	return &Upgrader{
 		cfg:        cfg,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: timeout},
 	}
 }
 
@@ -177,10 +183,36 @@ func (u *Upgrader) DownloadRelease(ctx context.Context, version, goos, goarch st
 	}
 	tmpFile.Close()
 
+	// --- Verify archive against checksums.txt (supply-chain integrity) ---
+	checksumURL := buildDownloadURL(version, "checksums.txt")
+	checksumsData, err := u.downloadText(ctx, checksumURL)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to download checksums.txt: %w", err)
+	}
+
+	zipAssetName := assetName + ".zip"
+	expectedZIP := expectedChecksumEntry(checksumsData, zipAssetName)
+	if expectedZIP == "" {
+		return "", nil, fmt.Errorf("asset %s not found in checksums.txt", zipAssetName)
+	}
+	if err := verifyFileHash(tmpPath, expectedZIP); err != nil {
+		return "", nil, fmt.Errorf("release archive checksum verification failed: %w", err)
+	}
+	log.Info("Release archive checksum verified", "asset", zipAssetName)
+
 	// Extract binary from archive
 	extractedPath, extractErr := extractBinary(tmpPath, tmpDir, goos)
 	if extractErr != nil {
 		return "", nil, fmt.Errorf("failed to extract binary from archive: %w", extractErr)
+	}
+
+	// Optionally verify the extracted binary if a -binary entry is published.
+	if expectedBin := expectedChecksumEntry(checksumsData, assetName+"-binary"); expectedBin != "" {
+		if err := verifyFileHash(extractedPath, expectedBin); err != nil {
+			os.Remove(extractedPath)
+			return "", nil, fmt.Errorf("extracted binary checksum verification failed: %w", err)
+		}
+		log.Info("Extracted binary checksum verified")
 	}
 
 	cleanup = func() {
@@ -220,6 +252,32 @@ func buildAssetName(version, goos, goarch string) string {
 func buildDownloadURL(version, assetName string) string {
 	// version already includes 'v' prefix (from LatestVersion)
 	return fmt.Sprintf("https://github.com/dimaskiddo/lmd-ng/releases/download/%s/%s.zip", version, assetName)
+}
+
+// downloadText fetches a small remote file (e.g. checksums.txt) and returns
+// its contents as a string.
+func (u *Upgrader) downloadText(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request for %s: %w", url, err)
+	}
+
+	resp, err := u.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("fetch %s returned status %d", url, resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("failed to read %s: %w", url, err)
+	}
+
+	return string(data), nil
 }
 
 // extractBinary finds and extracts the lmd-ng binary from a release archive.

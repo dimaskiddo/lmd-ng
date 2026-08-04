@@ -117,11 +117,16 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 	fmt.Println()
 
 	// --- Detect services ---
+	atpInstalled := service.IsServiceInstalled(service.ComponentATP)
 	dbsInstalled := service.IsServiceInstalled(service.ComponentDBS)
 	rtpInstalled := service.IsServiceInstalled(service.ComponentRTP)
 
 	// --- Stop services (if installed) ---
-	if rtpInstalled || dbsInstalled {
+	// Order: RTP → DBS → ATP. ATP releases its file locks last so protected
+	// files stay immutable for as long as any LMD-NG service is running. It
+	// must be stopped before the binary replacement so the immutable flag on
+	// the running executable can be cleared.
+	if atpInstalled || dbsInstalled || rtpInstalled {
 		fmt.Println("  Stopping services...")
 
 		if rtpInstalled {
@@ -137,6 +142,15 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 				log.Warn("Failed to stop DBS service (continuing)", "error", err)
 			} else {
 				fmt.Println("    DBS stopped")
+			}
+		}
+
+		if atpInstalled {
+			fmt.Println("    Releasing ATP file locks...")
+			if err := service.StopService(cfg, service.ComponentATP); err != nil {
+				log.Warn("Failed to stop ATP service (continuing)", "error", err)
+			} else {
+				fmt.Println("    ATP stopped")
 			}
 		}
 
@@ -177,8 +191,19 @@ func runUpgrade(cmd *cobra.Command, args []string) {
 	fmt.Println()
 
 	// --- Start services (if they were installed) ---
-	if rtpInstalled || dbsInstalled {
+	// Order: ATP → DBS → RTP. ATP locks files first, then DBS reads
+	// signatures, then RTP connects.
+	if atpInstalled || dbsInstalled || rtpInstalled {
 		fmt.Println("  Starting services...")
+
+		if atpInstalled {
+			fmt.Println("    Re-locking ATP file protection...")
+			if err := service.StartService(cfg, service.ComponentATP); err != nil {
+				log.Warn("Failed to start ATP service", "error", err)
+			} else {
+				fmt.Println("    ATP started")
+			}
+		}
 
 		if dbsInstalled {
 			if err := service.StartService(cfg, service.ComponentDBS); err != nil {

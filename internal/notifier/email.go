@@ -181,3 +181,90 @@ func (n *EmailNotifier) SendQuarantineNotification(ctx context.Context, filePath
 	log.Info("Quarantine notification email sent successfully", "recipients", len(n.cfg.Recipients))
 	return nil
 }
+
+// SendAlert sends a high-priority plain-text alert email (used for integrity /
+// tamper failures, where an HTML template is not needed).
+func (n *EmailNotifier) SendAlert(ctx context.Context, title, message string) error {
+	if !n.cfg.Enabled || len(n.cfg.Recipients) == 0 {
+		return nil
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Debug("Failed to get hostname, using fallback", "error", err)
+		hostname = "Unknown"
+	}
+
+	timestamp := time.Now().Format(time.RFC1123)
+	subject := fmt.Sprintf("Subject: [LMD-NG ALERT] %s on %s\r\n", title, hostname)
+	toHeader := fmt.Sprintf("To: %s\r\n", strings.Join(n.cfg.Recipients, ","))
+	fromHeader := fmt.Sprintf("From: %s\r\n", n.cfg.Sender)
+	mime := "MIME-version: 1.0;\nContent-Type: text/plain; charset=\"UTF-8\";\n\n"
+	body := fmt.Sprintf("LMD-NG Alert\n\nHost: %s\nTime: %s\n\n%s\n\n%s",
+		hostname, timestamp, title, message)
+	msg := []byte(subject + fromHeader + toHeader + mime + body)
+	addr := fmt.Sprintf("%s:%d", n.cfg.SMTPHost, n.cfg.SMTPPort)
+
+	var auth smtp.Auth
+	if n.cfg.SMTPUsername != "" {
+		auth = smtp.PlainAuth("", n.cfg.SMTPUsername, n.cfg.SMTPPassword, n.cfg.SMTPHost)
+	}
+
+	var sendErr error
+	if n.cfg.SMTPUseSSLTLS {
+		tlsconfig := &tls.Config{ServerName: n.cfg.SMTPHost}
+		dialer := &tls.Dialer{Config: tlsconfig}
+		conn, cerr := dialer.DialContext(ctx, "tcp", addr)
+		if cerr != nil {
+			return fmt.Errorf("failed to connect to SMTP server with TLS: %w", cerr)
+		}
+		defer conn.Close()
+
+		c, cerr := smtp.NewClient(conn, n.cfg.SMTPHost)
+		if cerr != nil {
+			return fmt.Errorf("failed to create SMTP client: %w", cerr)
+		}
+
+		if auth != nil {
+			if ok, _ := c.Extension("AUTH"); ok {
+				if err := c.Auth(auth); err != nil {
+					return fmt.Errorf("failed to authenticate: %w", err)
+				}
+			}
+		}
+
+		if err := c.Mail(n.cfg.Sender); err != nil {
+			return fmt.Errorf("failed to set sender: %w", err)
+		}
+		for _, recipient := range n.cfg.Recipients {
+			if err := c.Rcpt(recipient); err != nil {
+				return fmt.Errorf("failed to set recipient: %w", err)
+			}
+		}
+		w, werr := c.Data()
+		if werr != nil {
+			return fmt.Errorf("failed to send DATA command: %w", werr)
+		}
+		if _, err := w.Write(msg); err != nil {
+			return fmt.Errorf("failed to write email body: %w", err)
+		}
+		if err := w.Close(); err != nil {
+			return fmt.Errorf("failed to close data writer: %w", err)
+		}
+		c.Quit()
+	} else {
+		sendErr = smtp.SendMail(addr, auth, n.cfg.Sender, n.cfg.Recipients, msg)
+		if sendErr != nil {
+			return fmt.Errorf("failed to send email via standard SMTP: %w", sendErr)
+		}
+	}
+
+	log.Info("Alert notification email sent successfully", "title", title, "recipients", len(n.cfg.Recipients))
+	return nil
+}

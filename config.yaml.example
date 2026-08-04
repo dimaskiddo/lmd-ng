@@ -114,6 +114,10 @@ updater:
   remote_uri_timeout: "30s"
   signature_pack_url: "https://cdn.rfxn.com/downloads/maldet-sigpack.tgz"
   signature_version_url: "https://cdn.rfxn.com/downloads/maldet.sigs.ver"
+  # The RFXN CDN publishes maldet-sigpack.tgz.sha256, so no manual URL is needed
+  signature_checksum_suffix: ".sha256"
+  # Explicit override for the checksum file URL
+  signature_checksum_url: ""
   clamav_update_enabled: false
   clamav_mirror_url: "https://database.clamav.net"
   clamav_databases:

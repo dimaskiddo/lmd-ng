@@ -81,3 +81,51 @@ func (n *TelegramNotifier) SendQuarantineNotification(ctx context.Context, fileP
 	log.Info("Quarantine notification sent to Telegram successfully")
 	return nil
 }
+
+// SendAlert sends a high-priority alert message to Telegram.
+func (n *TelegramNotifier) SendAlert(ctx context.Context, title, message string) error {
+	if !n.cfg.Enabled || n.cfg.BotToken == "" || n.cfg.ChatID == "" {
+		return nil
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Debug("Failed to get hostname, using fallback", "error", err)
+		hostname = "Unknown"
+	}
+
+	body := fmt.Sprintf("🔴 <b>[ALERT] %s</b>\n\n<b>Host:</b> %s\n\n%s",
+		title, hostname, message)
+
+	payload := map[string]interface{}{
+		"chat_id":    n.cfg.ChatID,
+		"text":       body,
+		"parse_mode": "HTML",
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal telegram payload: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", n.cfg.BotToken)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create telegram request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send telegram request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("telegram API returned status: %d", resp.StatusCode)
+	}
+
+	log.Info("Alert notification sent to Telegram successfully", "title", title)
+	return nil
+}

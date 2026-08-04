@@ -22,16 +22,17 @@ Service install and uninstall operations require elevated privileges:
   - Windows       : run from an Administrator command prompt
 
 Components:
+  atp   Anti-Tamper Protection (file locking)
   dbs   Database Signature Service (server)
   rtp   Real-Time Protector (client)
 
-If no component is specified, the command acts on both components.
-For install/start: DBS is processed first, then RTP.
-For stop/uninstall: RTP is processed first, then DBS.`,
+If no component is specified, the command acts on all three components.
+For install/start: ATP, then DBS, then RTP.
+For stop/uninstall: RTP, then DBS, then ATP.`,
 	}
 
 	serviceCmd.AddCommand(&cobra.Command{
-		Use:   "install [dbs|rtp]",
+		Use:   "install [atp|dbs|rtp]",
 		Short: "Install LMD-NG as System Service",
 		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -56,7 +57,7 @@ For stop/uninstall: RTP is processed first, then DBS.`,
 	})
 
 	serviceCmd.AddCommand(&cobra.Command{
-		Use:   "uninstall [dbs|rtp]",
+		Use:   "uninstall [atp|dbs|rtp]",
 		Short: "Stop and Remove the LMD-NG from System Service",
 		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -81,7 +82,7 @@ For stop/uninstall: RTP is processed first, then DBS.`,
 	})
 
 	serviceCmd.AddCommand(&cobra.Command{
-		Use:   "start [dbs|rtp]",
+		Use:   "start [atp|dbs|rtp]",
 		Short: "Start LMD-NG System Service",
 		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -100,7 +101,7 @@ For stop/uninstall: RTP is processed first, then DBS.`,
 	})
 
 	serviceCmd.AddCommand(&cobra.Command{
-		Use:   "stop [dbs|rtp]",
+		Use:   "stop [atp|dbs|rtp]",
 		Short: "Stop LMD-NG System Service",
 		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -119,7 +120,7 @@ For stop/uninstall: RTP is processed first, then DBS.`,
 	})
 
 	serviceCmd.AddCommand(&cobra.Command{
-		Use:   "restart [dbs|rtp]",
+		Use:   "restart [atp|dbs|rtp]",
 		Short: "Restart LMD-NG System Service",
 		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -142,18 +143,24 @@ For stop/uninstall: RTP is processed first, then DBS.`,
 
 // resolveComponents returns the list of components to operate on based on the
 // CLI args. If no component is specified, returns all components in the
-// appropriate order. For stop/uninstall (reverseOrder=true), RTP comes before
-// DBS so the client stops before the server.
+// appropriate order.
+//
+// install/start order: ATP → DBS → RTP — ATP locks files first so protected
+// files are never writable while services operate on them.
+//
+// stop/uninstall order (reverseOrder=true): RTP → DBS → ATP — RTP (client)
+// stops before DBS (server), and ATP releases its file locks last so files
+// remain protected for as long as any LMD-NG service is running.
 func resolveComponents(args []string, reverseOrder bool) []service.Component {
 	if len(args) == 1 {
 		return []service.Component{service.Component(args[0])}
 	}
 
 	if reverseOrder {
-		return []service.Component{service.ComponentRTP, service.ComponentDBS}
+		return []service.Component{service.ComponentRTP, service.ComponentDBS, service.ComponentATP}
 	}
 
-	return []service.Component{service.ComponentDBS, service.ComponentRTP}
+	return []service.Component{service.ComponentATP, service.ComponentDBS, service.ComponentRTP}
 }
 
 // handleServiceError handles service management errors with appropriate

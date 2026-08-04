@@ -23,6 +23,7 @@ Rewrite Linux Malware Detect (LMD/Maldet) from Bash into a modern Golang applica
 
 | Component | Role |
 |---|---|
+| **ATP** | Anti-Tamper Protection — locks critical files (binary, config, signatures, TLS certs, quarantine) against modification/deletion. Linux: chattr +i + fanotify FAN_DENY; macOS: chflags SF_IMMUTABLE; Windows: DACL + exclusive handles |
 | **DBS** | Database Signature Server — TCP/TLS daemon holding signature engines in memory, streams scan requests from clients |
 | **RTP** | Real-Time Protector — file system monitor client, streams changed files to DBS for matching, handles quarantine locally |
 | **Scanner** | Core engine: `SignatureEngine` interface + optional `HeuristicScanner`, two-pass orchestrator `ScanDataWithEngines` (Pass 1: hash-only `Scan`; Pass 2: heuristic `ScanHeuristics`). `LMDSignatureScanner` (LMD native MD5/SHA256/HEX + RFXN HDB/MDB/NDB), `ClamAVSignatureEngine` (ClamAV CVD HDB/MDB/NDB), `Walker`, `ScanCoordinator` |
@@ -59,7 +60,8 @@ Scan runs in two passes. Pass 1 (hash-based, deterministic) runs all engines' `S
 
 ```
 lmd-ng [--config <path>]
-  daemon                  # Start DBS + RTP in single process
+  daemon                  # Start ATP + DBS + RTP in single process (ATP starts first)
+    atp                   # Start only Anti-Tamper Protection daemon
     dbs                   # Start only DBS server
     rtp                   # Start only RTP client
   scan <path>             # On-demand scan (DBS-first, local fallback)
@@ -67,9 +69,9 @@ lmd-ng [--config <path>]
   upgrade [--force]       # Self-upgrade binary from GitHub releases
   status                  # Display DBS status, signature counts, versions, quarantine, RTP, scheduler
   service
-    install [dbs|rtp]     # Install as OS service
-    uninstall [dbs|rtp]   # Remove OS service
-    start/stop/restart    # [dbs|rtp]
+    install [atp|dbs|rtp]     # Install as OS service
+    uninstall [atp|dbs|rtp]   # Remove OS service
+    start/stop/restart        # [atp|dbs|rtp]
   quarantine
     list                  # List quarantined files
     add <file>            # Manually quarantine
@@ -151,6 +153,7 @@ lmd-ng/
 ├── cmd/lmd-ng/           # Entry: cobra CLI (main, daemon, scan, update, upgrade, status, service, quarantine, version)
 ├── internal/
 │   ├── config/           # Viper YAML config, path resolution, hot-reload (SIGHUP)
+│   ├── atp/              # Anti-Tamper Protection (Linux chattr+fanotify, macOS chflags, Windows DACL)
 │   ├── dbs/              # Database Signature Server (TCP/TLS, Unix socket, connection pool, client)
 │   ├── rtp/              # Real-Time Protector (FS monitor client)
 │   ├── scanner/          # Signature engines, walker, scan coordinator

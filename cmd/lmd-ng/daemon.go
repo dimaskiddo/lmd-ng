@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/dimaskiddo/lmd-ng/internal/atp"
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/dbs"
 	"github.com/dimaskiddo/lmd-ng/internal/log"
@@ -67,6 +68,21 @@ Subcommands:
 				defer wg.Done()
 				handleConfigReload(ctx)
 			}()
+
+			// --- Start ATP first: lock files before DBS loads signatures ---
+			var atpControl chan string
+			protector := atp.NewProtector(cfg)
+			protector.SetAlertFunc(func(title, msg string) {
+				_ = buildMultiNotifier(cfg).SendAlert(ctx, title, msg)
+			})
+			control, atpErr := protector.Protect(ctx)
+			if atpErr != nil {
+				log.Error("ATP: failed to start", "error", atpErr)
+				log.Warn("ATP: continuing without active tamper protection")
+			} else {
+				atpControl = control
+				log.Info("ATP: active tamper protection enabled")
+			}
 
 			// --- Start DBS server in background ---
 			engines, err := buildEngines(cfg)
@@ -167,12 +183,18 @@ Subcommands:
 			scanSched.Stop()
 			updateSched.Stop()
 			server.Shutdown()
+
+			// Shut down ATP last so files stay protected until services stop.
+			if atpControl != nil {
+				atpControl <- "shutdown"
+			}
 			wg.Wait()
 		},
 	}
 
 	cmd.AddCommand(dbsCmd())
 	cmd.AddCommand(rtpCmd())
+	cmd.AddCommand(atpCmd())
 
 	return cmd
 }
@@ -333,6 +355,69 @@ quarantine locally. The DBS server must be running before starting RTP.`,
 			wg.Wait()
 		},
 	}
+}
+
+func atpCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "atp",
+		Short: "Start the Anti-Tamper Protection daemon",
+		Long: `Start the Anti-Tamper Protection (ATP) daemon.
+
+ATP locks LMD-NG's critical files against modification/deletion by malware.
+On Linux: chattr +i immutable flags + fanotify FAN_DENY permission listener.
+On macOS: chflags SF_IMMUTABLE. On Windows: deny-write DACL + exclusive handles.
+Runs standalone or alongside DBS and RTP as part of 'lmd-ng daemon'.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+
+			cfg := cfgMgr.GetConfig()
+
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				handleConfigReload(ctx)
+			}()
+
+			protector := atp.NewProtector(cfg)
+			protector.SetAlertFunc(func(title, msg string) {
+				_ = buildMultiNotifier(cfg).SendAlert(ctx, title, msg)
+			})
+			controlCh, err := protector.Protect(ctx)
+			if err != nil {
+				log.Error("ATP: failed to start protection", "error", err)
+				os.Exit(1)
+			}
+
+			log.Info("LMD-NG ATP (Anti-Tamper Protection) started")
+			<-ctx.Done()
+
+			log.Info("LMD-NG ATP shutting down...")
+			if controlCh != nil {
+				controlCh <- "shutdown"
+			}
+			wg.Wait()
+		},
+	}
+}
+
+// buildMultiNotifier constructs a MultiNotifier from the current config.
+func buildMultiNotifier(cfg *config.Config) *notifier.MultiNotifier {
+	var notifiers []notifier.Notifier
+	if cfg.Notification.Email.Enabled {
+		notifiers = append(notifiers, notifier.NewEmailNotifier(&cfg.Notification.Email))
+	}
+	if cfg.Notification.Telegram.Enabled {
+		notifiers = append(notifiers, notifier.NewTelegramNotifier(&cfg.Notification.Telegram))
+	}
+	if cfg.Notification.Discord.Enabled {
+		notifiers = append(notifiers, notifier.NewDiscordNotifier(&cfg.Notification.Discord))
+	}
+	if cfg.Notification.Slack.Enabled {
+		notifiers = append(notifiers, notifier.NewSlackNotifier(&cfg.Notification.Slack))
+	}
+	return notifier.NewMultiNotifier(notifiers...)
 }
 
 func handleConfigReload(ctx context.Context) {

@@ -16,6 +16,10 @@ import (
 type Component string
 
 const (
+	// ComponentATP is the Anti-Tamper Protection daemon. It locks LMD-NG's
+	// critical files against modification/deletion and runs as lmd-ng-atp.
+	ComponentATP Component = "atp"
+
 	// ComponentDBS is the Database Signature Service (server).
 	ComponentDBS Component = "dbs"
 
@@ -54,6 +58,9 @@ func serviceName(comp Component) string {
 // displayName returns a human-readable display name for the given component.
 func displayName(comp Component) string {
 	switch comp {
+	case ComponentATP:
+		return "LMD-NG Anti-Tamper Protection"
+
 	case ComponentDBS:
 		return "LMD-NG Database Signature Service"
 
@@ -77,6 +84,16 @@ func buildServiceConfig(exePath string, comp Component) *kservice.Config {
 
 	// Delegate platform-specific privilege and option population.
 	applyPlatformConfig(cfg)
+
+	// ATP is the last line of defense against tampering. If it dies, protected
+	// files may become writable — so a watchdog ensures the service manager
+	// restarts it promptly rather than letting it linger in a failed state.
+	if comp == ComponentATP {
+		if cfg.Option == nil {
+			cfg.Option = kservice.KeyValue{}
+		}
+		cfg.Option["WatchdogSec"] = 60
+	}
 
 	return cfg
 }

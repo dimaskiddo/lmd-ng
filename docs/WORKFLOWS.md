@@ -24,7 +24,8 @@ flowchart TD
     subgraph S1["1. Boot"]
         Boot[load config] --> InitLog[init logger]
         InitLog --> EnsureDirs[ensure directories]
-        EnsureDirs --> BuildEngines[build signature engines]
+        EnsureDirs --> StartATP[start ATP — lock critical files]
+        StartATP --> BuildEngines[build signature engines]
         BuildEngines --> StartDBS[start DBS server]
     end
 
@@ -73,12 +74,19 @@ flowchart TD
 
 ### 1. Startup (`cmd/lmd-ng/main.go`, `cmd/lmd-ng/daemon.go`)
 
-1. **Config:** `config.NewConfigManager()` — search binary dir → `/etc/lmd-ng/` → `/usr/local/etc/lmd-ng/` → `/usr/local/lmd-ng/`. Resolve all paths relative to binary's directory.
-2. **Logger:** `log.InitLogger()` — dual output (stdout + lumberjack file) when `output: "file"`.
-3. **Ensure dirs:** Create `logs/`, `sigs/`, `quarantine/`, `clamav/` (if enabled).
-4. **Build engines:** `buildEngines(cfg)` — always create `LMDSignatureScanner` (loads LMD native: MD5 + SHA256 + HEX, plus RFXN: HDB (MD5 + SHA1 + SHA256 file-hash lookup) + MDB + NDB via `pkg/clamav`). Hash-based sub-scanners (MD5, SHA256, RFXN HDB, RFXN MDB) are always active. Heuristic sub-scanners (HEX, RFXN NDB) are gated by `enabled_heuristics` config. If `clamav_enabled: true`, also create `ClamAVSignatureEngine` (HDB + MDB always active; NDB gated by `enabled_heuristics`).
-5. **Start DBS:** `dbs.NewServer(cfg, engines)` — set `EngineFactory` for hot-reload. `server.Serve(ctx)` enters accept loop.
-6. **SIGHUP goroutine:** `handleConfigReload()` — re-read YAML, swap config atomically. Triggers `EngineFactory` to rebuild engines.
+1. **ATP:** `atp.NewProtector(cfg)` — lock critical files before any other service touches them.
+   - Linux: set FS_IMMUTABLE_FL on all protected files, start fanotify FAN_DENY permission listener + inotify tamper detection monitor.
+   - macOS: set SF_IMMUTABLE on all protected files, start periodic recheck.
+   - Windows: apply deny-write DACL + audit SACL + exclusive handles on all protected files, start periodic recheck.
+   - Self-exe check: verify the running binary's inode hasn't been replaced (Linux `/proc/self/exe (deleted)` check).
+   - Returns control channel for unlock/lock/shutdown. Shuts down LAST after RTP and DBS stop.
+   - Fails non-fatally — logs warning and continues without active tamper protection.
+2. **Config:** `config.NewConfigManager()` — search binary dir → `/etc/lmd-ng/` → `/usr/local/etc/lmd-ng/` → `/usr/local/lmd-ng/`. Resolve all paths relative to binary's directory.
+3. **Logger:** `log.InitLogger()` — dual output (stdout + lumberjack file) when `output: "file"`.
+4. **Ensure dirs:** Create `logs/`, `sigs/`, `quarantine/`, `clamav/` (if enabled).
+5. **Build engines:** `buildEngines(cfg)` — always create `LMDSignatureScanner` (loads LMD native: MD5 + SHA256 + HEX, plus RFXN: HDB (MD5 + SHA1 + SHA256 file-hash lookup) + MDB + NDB via `pkg/clamav`). Hash-based sub-scanners (MD5, SHA256, RFXN HDB, RFXN MDB) are always active. Heuristic sub-scanners (HEX, RFXN NDB) are gated by `enabled_heuristics` config. If `clamav_enabled: true`, also create `ClamAVSignatureEngine` (HDB + MDB always active; NDB gated by `enabled_heuristics`).
+6. **Start DBS:** `dbs.NewServer(cfg, engines)` — set `EngineFactory` for hot-reload. `server.Serve(ctx)` enters accept loop.
+7. **SIGHUP goroutine:** `handleConfigReload()` — re-read YAML, swap config atomically. Triggers `EngineFactory` to rebuild engines.
 
 ### 2. Signature Update (`internal/updater/updater.go`)
 
@@ -273,6 +281,11 @@ flowchart TD
 | Upgrade download fails | Log error, exit 1. No binary modified |
 | Upgrade service stop fails | Log warning, continue. Binary still replaced |
 | Upgrade binary replace fails | Log error, exit 1. Old binary backed up as `.old` |
+| ATP protection fails at startup | Logged as error, warn "continuing without active tamper protection". Daemon proceeds |
+| ATP immutable flag fails on a file | Logged as warning; other files protected. Filesystem may not support it (tmpfs, NFS) |
+| ATP fanotify_init fails (kernel too old, no CAP_SYS_ADMIN) | Logged as warning; falls back to chattr+i only. Periodic recheck still active |
+| ATP periodic recheck detects flags cleared | Log tamper detection event, re-apply protection |
+| ATP tamper detected (self-exe replaced) | Logged as error, alert sent to all configured notifiers via MultiNotifier.SendAlert |
 | Engine creation failure at startup | `buildEngines()` returns error → `os.Exit(1)` |
 | ClamAV engine creation failure | Logged as warning, ClamAV engine skipped. Scan continues without ClamAV signatures |
 | DBS client creation failure for scan scheduler | `os.Exit(1)` — scan scheduler cannot function without DBS client |

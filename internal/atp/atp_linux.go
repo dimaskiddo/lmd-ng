@@ -1,0 +1,138 @@
+//go:build linux
+
+package atp
+
+import (
+	"fmt"
+	"os"
+	"unsafe"
+
+	"github.com/dimaskiddo/lmd-ng/internal/log"
+	"golang.org/x/sys/unix"
+)
+
+// ext2IMMUTABLEFL is the FS_IMMUTABLE_FL inode flag value. It maps to the
+// `chattr +i` immutable attribute. Set directly by ioctl — no external
+// chattr binary is used.
+const ext2IMMUTABLEFL = 0x00000010
+
+// applyProtection sets the immutable flag on every protected file. Files that
+// do not exist are skipped (they may be created later); files on filesystems
+// that do not support the immutable flag (tmpfs, NFS, etc.) are warned about
+// but do not abort protection of the remaining files.
+func (p *Protector) applyProtection(files []string) error {
+	var errs []error
+	for _, f := range files {
+		if err := setImmutable(f); err != nil {
+			if os.IsNotExist(err) {
+				log.Debug("ATP: skipping non-existent file", "file", f)
+				continue
+			}
+			log.Warn("ATP: cannot set immutable flag (unsupported filesystem?)",
+				"file", f, "error", err)
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to protect %d files: %w", len(errs), errs[0])
+	}
+	return nil
+}
+
+// removeProtection clears the immutable flag on all protected files.
+func (p *Protector) removeProtection(files []string) error {
+	for _, f := range files {
+		if isImmutableSet(f) {
+			if err := clearImmutable(f); err != nil {
+				log.Warn("ATP: failed to clear immutable flag",
+					"file", f, "error", err)
+			}
+		}
+	}
+	log.Info("ATP: released all immutable flags")
+	return nil
+}
+
+// setImmutable sets FS_IMMUTABLE_FL on the file via the FS_IOC_SETFLAGS ioctl.
+// Pure Go syscall — no CGO, no libc.
+func setImmutable(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var flags int32
+	_, _, errno := unix.Syscall(unix.SYS_IOCTL, f.Fd(),
+		uintptr(unix.FS_IOC_GETFLAGS), uintptr(unsafe.Pointer(&flags)))
+	if errno != 0 {
+		return fmt.Errorf("ioctl FS_IOC_GETFLAGS: %w", errno)
+	}
+
+	flags |= ext2IMMUTABLEFL
+	_, _, errno = unix.Syscall(unix.SYS_IOCTL, f.Fd(),
+		uintptr(unix.FS_IOC_SETFLAGS), uintptr(unsafe.Pointer(&flags)))
+	if errno != 0 {
+		return fmt.Errorf("ioctl FS_IOC_SETFLAGS: %w", errno)
+	}
+
+	log.Debug("ATP: +i set", "file", path)
+	return nil
+}
+
+// clearImmutable removes FS_IMMUTABLE_FL from the file.
+func clearImmutable(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var flags int32
+	_, _, errno := unix.Syscall(unix.SYS_IOCTL, f.Fd(),
+		uintptr(unix.FS_IOC_GETFLAGS), uintptr(unsafe.Pointer(&flags)))
+	if errno != 0 {
+		return fmt.Errorf("ioctl FS_IOC_GETFLAGS: %w", errno)
+	}
+
+	flags &^= ext2IMMUTABLEFL
+	_, _, errno = unix.Syscall(unix.SYS_IOCTL, f.Fd(),
+		uintptr(unix.FS_IOC_SETFLAGS), uintptr(unsafe.Pointer(&flags)))
+	if errno != 0 {
+		return fmt.Errorf("ioctl FS_IOC_SETFLAGS (clear): %w", errno)
+	}
+
+	log.Debug("ATP: +i cleared", "file", path)
+	return nil
+}
+
+// isImmutableSet reports whether FS_IMMUTABLE_FL is currently set on a file.
+func isImmutableSet(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	var flags int32
+	_, _, errno := unix.Syscall(unix.SYS_IOCTL, f.Fd(),
+		uintptr(unix.FS_IOC_GETFLAGS), uintptr(unsafe.Pointer(&flags)))
+	if errno != 0 {
+		return false
+	}
+	return flags&ext2IMMUTABLEFL != 0
+}
+
+// recheckFiles verifies each file still carries the immutable flag and
+// re-applies it if it was cleared. A cleared flag is a strong tamper signal.
+func (p *Protector) recheckFiles(files []string) {
+	for _, f := range files {
+		if isImmutableSet(f) {
+			continue
+		}
+		log.Warn("ATP: immutable flag was cleared — re-applying", "file", f)
+		if err := setImmutable(f); err != nil {
+			log.Error("ATP: failed to re-apply immutable flag", "file", f, "error", err)
+		}
+	}
+}

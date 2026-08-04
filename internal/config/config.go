@@ -153,10 +153,19 @@ type SchedulerConfig struct {
 
 // UpdaterConfig holds signature and binary updater settings.
 type UpdaterConfig struct {
-	AutoUpdateSignatures bool     `yaml:"auto_update_signatures" mapstructure:"auto_update_signatures"`
-	RemoteURITimeout     string   `yaml:"remote_uri_timeout" mapstructure:"remote_uri_timeout"`
-	SignaturePackURL     string   `yaml:"signature_pack_url" mapstructure:"signature_pack_url"`
-	SignatureVersionURL  string   `yaml:"signature_version_url" mapstructure:"signature_version_url"`
+	AutoUpdateSignatures bool   `yaml:"auto_update_signatures" mapstructure:"auto_update_signatures"`
+	RemoteURITimeout     string `yaml:"remote_uri_timeout" mapstructure:"remote_uri_timeout"`
+	SignaturePackURL     string `yaml:"signature_pack_url" mapstructure:"signature_pack_url"`
+	SignatureVersionURL  string `yaml:"signature_version_url" mapstructure:"signature_version_url"`
+	// SignatureChecksumSuffix is appended to SignaturePackURL to locate the
+	// archive's checksum file on the CDN (e.g. ".sha256"). The RFXN CDN
+	// publishes maldet-sigpack.tgz.sha256, so the checksum URL is derived
+	// automatically and needs no manual configuration.
+	SignatureChecksumSuffix string `yaml:"signature_checksum_suffix" mapstructure:"signature_checksum_suffix"`
+	// SignatureChecksumURL is an explicit override for the checksum file URL
+	// (one "<sha256>  <filename>" line per file). Empty (default) means the
+	// checksum URL is derived from SignaturePackURL + SignatureChecksumSuffix.
+	SignatureChecksumURL string   `yaml:"signature_checksum_url" mapstructure:"signature_checksum_url"`
 	ClamAVUpdateEnabled  bool     `yaml:"clamav_update_enabled" mapstructure:"clamav_update_enabled"`
 	ClamAVMirrorURL      string   `yaml:"clamav_mirror_url" mapstructure:"clamav_mirror_url"`
 	ClamAVDatabases      []string `yaml:"clamav_databases" mapstructure:"clamav_databases"`
@@ -298,6 +307,8 @@ func setDefaultConfig(config *Config) {
 
 	config.Updater.SignaturePackURL = "https://cdn.rfxn.com/downloads/maldet-sigpack.tgz"
 	config.Updater.SignatureVersionURL = "https://cdn.rfxn.com/downloads/maldet.sigs.ver"
+	config.Updater.SignatureChecksumSuffix = ".sha256"
+	config.Updater.SignatureChecksumURL = ""
 
 	config.Updater.ClamAVUpdateEnabled = false
 	config.Updater.ClamAVMirrorURL = "https://database.clamav.net"

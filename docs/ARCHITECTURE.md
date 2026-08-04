@@ -21,6 +21,7 @@ graph LR
     end
 
     subgraph internal["internal/"]
+        ATP["atp/"]
         Config["config/"]
         Log["log/"]
         DBS["dbs/"]
@@ -45,11 +46,13 @@ graph LR
     Config --> Daemon
     Config --> Scan
     Config --> Update
+    Config --> ATP
     Log --> Daemon
     Log --> DBS
     Log --> RTP
     Log --> Scanner
     Log --> Monitor
+    Log --> ATP
 
     Daemon --> DBS
     Daemon --> RTP
@@ -57,6 +60,8 @@ graph LR
     Daemon --> Scheduler
     Daemon --> Notifier
     Daemon --> QuarantineMgr
+    Daemon --> ATP
+    ATP --> Notifier
 
     DBS --> Protocol
     DBS --> Scanner
@@ -105,6 +110,7 @@ sequenceDiagram
 
 | Component | Package | Role |
 |---|---|---|
+| **ATP** | `internal/atp/` | Anti-Tamper Protection — locks critical files via OS-level immutable/deny mechanisms. Linux: `chattr +i` + fanotify FAN_DENY + inotify detection. macOS: `chflags SF_IMMUTABLE` + periodic recheck. Windows: deny-write DACL + audit SACL + exclusive handles. |
 | **DBS** | `internal/dbs/` | Signature server — holds engines, accepts scan requests, returns results |
 | **RTP** | `internal/rtp/` | FS monitor — watches paths, streams changes to DBS, handles quarantine locally |
 | **Scanner** | `internal/scanner/` | Engine interface + LMD/ClamAV scanners + walker + coordinator |
@@ -142,6 +148,32 @@ Binary wire format: `[1-byte type][4-byte length BE][payload]`
 **Limits:** `MaxChunkSize` = 32KB, `MaxPayloadSize` = 1MB. TLS mandatory (`tls.VersionTLS13`, mutual auth). Auto-generated certs use ECDSA P-256.
 
 **Note:** `MsgReloadSignatures`/`MsgReloadAck` are used by `lmd-ng update` to notify a running DBS server to reload engines after signature download.
+
+---
+
+## 2.5. ATP — Anti-Tamper Protection (`internal/atp/`)
+
+Prevents malware from modifying or deleting LMD-NG's own files (binary, config, signatures, TLS certs, quarantine).
+
+### Startup Order
+
+ATP starts FIRST to lock files before DBS loads signatures. On shutdown, ATP releases LAST so files remain protected for as long as any LMD-NG service is running. Order: ATP → DBS → RTP at startup; RTP → DBS → ATP at shutdown.
+
+### Platform Layers
+
+| Platform | Layer 1: Static | Layer 2: Active | Layer 3: Detection |
+|---|---|---|---|
+| **Linux** | `ioctl FS_IOC_SETFLAGS` sets `FS_IMMUTABLE_FL` (chattr +i equivalent, pure Go syscall) | fanotify FAN_OPEN_PERM listener denies write opens on protected inodes | inotify watcher detects chattr -i, re-applies immutable flag; periodic recheck every 5 min |
+| **macOS** | `chflags SF_IMMUTABLE` via raw syscall (pure Go) | — (cannot be bypassed without single-user mode/SIP disabled) | Periodic recheck every 5 min |
+| **Windows** | Deny-write DACL + audit SACL via `SetNamedSecurityInfo` | Exclusive file handles (dwShareMode=0) via `CreateFile` | Periodic recheck every 5 min |
+
+### Self-Upgrade
+
+ATP supports unlock/lock via control channel. Before binary replacement during upgrade, `ReleaseAll()` clears immutable flags and fanotify marks. After replacement, protections are re-applied.
+
+### Config
+
+ATP is always-on — no config toggles. Protected files are auto-derived: binary (via `os.Executable`), config (all standard locations), signatures dir, TLS certs dir, quarantine dir, and ClamAV DBs (only when `clamav_enabled: true`).
 
 ---
 
@@ -320,6 +352,7 @@ Triggered on: **quarantine events only** (file detected + encrypted + moved).
 
 | Service Name | Component | Description |
 |---|---|---|
+| `lmd-ng-atp` | `atp` | Anti-Tamper Protection |
 | `lmd-ng-dbs` | `dbs` | Database Signature Server |
 | `lmd-ng-rtp` | `rtp` | Real-Time Protector |
 

@@ -2,8 +2,11 @@ package updater
 
 import (
 	"archive/tar"
+	"bufio"
 	"compress/gzip"
 	"context"
+	"crypto/md5"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -110,6 +113,15 @@ func (u *Updater) updateLMDSignatures(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("failed to download signature package from %s: %w", u.cfg.Updater.SignaturePackURL, err)
 	}
 	defer os.Remove(packagePath)
+
+	// Verify the signature pack against the CDN-published checksum. The checksum
+	// URL is derived from signature_pack_url (a sibling .sha256/.md5 file), so no
+	// manual configuration is required. An explicit signature_checksum_url, if
+	// set, takes precedence.
+	if err := u.verifySignaturePackChecksum(ctx, packagePath); err != nil {
+		return false, fmt.Errorf("signature pack checksum verification failed: %w", err)
+	}
+	log.Info("Signature pack checksum verified")
 
 	// Extract package into the signatures directory
 	sigDirPath := u.cfg.App.SignaturesDir
@@ -274,6 +286,14 @@ func (u *Updater) downloadClamAVDatabase(ctx context.Context, url, localPath, cl
 		return false, fmt.Errorf("failed to rename temp file to %s: %w", localPath, err)
 	}
 
+	// Lightweight structural integrity check for CVD databases.
+	if strings.HasSuffix(localPath, ".cvd") {
+		if err := u.verifyCVDStructure(localPath); err != nil {
+			log.Warn("CVD structure check warning (database may be corrupt)",
+				"path", localPath, "error", err)
+		}
+	}
+
 	log.Info("Downloaded ClamAV database", "url", url, "path", localPath)
 	return true, nil
 }
@@ -359,6 +379,165 @@ func (u *Updater) downloadFile(ctx context.Context, url, outputPath string) erro
 	}
 
 	log.Info("Downloaded file", "url", url, "path", outputPath)
+	return nil
+}
+
+// downloadText fetches a small remote file and returns its contents as a string.
+func (u *Updater) downloadText(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request for %s: %w", url, err)
+	}
+
+	resp, err := u.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("fetch %s returned status %d", url, resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("failed to read %s: %w", url, err)
+	}
+	return string(data), nil
+}
+
+// verifySignaturePackChecksum verifies the downloaded signature pack against a
+// checksum published by the upstream CDN. The checksum URL is derived from
+// signature_pack_url (append the configured suffix, default ".sha256").
+//
+// Priority:
+//  1. SignatureChecksumURL — if explicitly configured, use it verbatim.
+//  2. Derived sibling URL (SignaturePackURL + SignatureChecksumSuffix).
+//  3. If the derived URL returns 404, fall back to ".md5".
+//
+// The checksum file format is GNU checksum output: one "<hex>  <filename>" line.
+func (u *Updater) verifySignaturePackChecksum(ctx context.Context, packPath string) error {
+	checksumURL, expected, err := u.fetchSigpackChecksum(ctx)
+	if err != nil {
+		return err
+	}
+	if expected == "" {
+		return fmt.Errorf("no checksum found for %s at %s", filepath.Base(packPath), checksumURL)
+	}
+	log.Debug("Sigpack checksum located", "url", checksumURL, "hash", expected[:min(16, len(expected))]+"...")
+
+	actual, err := computeFileDigest(packPath, len(expected))
+	if err != nil {
+		return fmt.Errorf("cannot hash signature pack: %w", err)
+	}
+
+	if actual != expected {
+		return fmt.Errorf("signature pack checksum mismatch: expected %s, got %s", expected, actual)
+	}
+	return nil
+}
+
+// fetchSigpackChecksum returns the checksum URL and expected hex digest for the
+// signature pack, trying sources in priority order (explicit URL, derived
+// suffix, .md5 fallback). Returns an error when no reachable source lists the
+// pack filename.
+func (u *Updater) fetchSigpackChecksum(ctx context.Context) (url, expected string, err error) {
+	base := filepath.Base(u.cfg.Updater.SignaturePackURL)
+
+	var candidates []string
+	if u.cfg.Updater.SignatureChecksumURL != "" {
+		candidates = append(candidates, u.cfg.Updater.SignatureChecksumURL)
+	}
+	if s := u.cfg.Updater.SignatureChecksumSuffix; s != "" {
+		candidates = append(candidates, u.cfg.Updater.SignaturePackURL+s)
+	}
+	// MD5 fallback when the stronger .sha256 sibling is unavailable.
+	candidates = append(candidates, u.cfg.Updater.SignaturePackURL+".md5")
+
+	for _, cand := range candidates {
+		if cand == "" {
+			continue
+		}
+		data, err := u.downloadText(ctx, cand)
+		if err != nil {
+			continue // try next candidate
+		}
+		hex, ok := parseChecksumLine(data, base)
+		if !ok {
+			continue
+		}
+		// SHA-256 digests are 64 hex chars; MD5 are 32.
+		switch len(hex) {
+		case 64, 32:
+			return cand, hex, nil
+		}
+	}
+
+	return "", "", fmt.Errorf("no checksum source available for %s", base)
+}
+
+// parseChecksumLine extracts the lowercase hex digest for a filename from GNU
+// checksum output ("<hex>  <filename>" per line). Returns ok=false when the
+// file is not listed.
+func parseChecksumLine(data, filename string) (string, bool) {
+	scanner := bufio.NewScanner(strings.NewReader(data))
+	for scanner.Scan() {
+		parts := strings.Fields(scanner.Text())
+		if len(parts) >= 2 && strings.TrimSuffix(parts[1], "\t") == filename {
+			return strings.ToLower(parts[0]), true
+		}
+	}
+	return "", false
+}
+
+// computeFileDigest hashes the file with the algorithm implied by expectedLen:
+// 64 → SHA-256, 32 → MD5. Returns the lowercase hex digest.
+func computeFileDigest(path string, expectedLen int) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	switch expectedLen {
+	case 64:
+		h := sha256.New()
+		if _, err := io.Copy(h, f); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%x", h.Sum(nil)), nil
+	case 32:
+		h := md5.New()
+		if _, err := io.Copy(h, f); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%x", h.Sum(nil)), nil
+	default:
+		return "", fmt.Errorf("unsupported digest length %d", expectedLen)
+	}
+}
+
+// verifyCVDStructure performs a lightweight structural check on a ClamAV CVD
+// file: the 512-byte header must carry the "ClamAV-VDB" magic. The full
+// cryptographic integrity check is done by pkg/clamav when the database is
+// loaded. This catches truncated or corrupt downloads early.
+func (u *Updater) verifyCVDStructure(cvdPath string) error {
+	f, err := os.Open(cvdPath)
+	if err != nil {
+		return fmt.Errorf("cannot open CVD file: %w", err)
+	}
+	defer f.Close()
+
+	header := make([]byte, 512)
+	n, err := io.ReadFull(f, header)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return fmt.Errorf("cannot read CVD header: %w", err)
+	}
+
+	headerStr := strings.TrimRight(string(header[:n]), "\x00 \n\r\t")
+	if !strings.HasPrefix(headerStr, "ClamAV-VDB") {
+		return fmt.Errorf("CVD header missing ClamAV-VDB magic: %q", headerStr)
+	}
 	return nil
 }
 

@@ -66,6 +66,7 @@ clean-build:
 	rm -f config.yaml
 	rm -f $(SERVICE_NAME).sock
 	rm -f $(SERVICE_NAME)
+	rm -f ./*.o
 
 clean:
 	make clean-dist

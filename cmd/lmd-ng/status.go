@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/dimaskiddo/lmd-ng/internal/atp"
 	"github.com/dimaskiddo/lmd-ng/internal/config"
 	"github.com/dimaskiddo/lmd-ng/internal/dbs"
 	"github.com/dimaskiddo/lmd-ng/internal/protocol"
@@ -41,6 +42,13 @@ func runStatus(cmd *cobra.Command, args []string) {
 	fmt.Printf("  %-18s %s\n", "Config:", configPath)
 	fmt.Printf("  %-18s %s\n", "Base Path:", cfg.App.BasePath)
 	fmt.Printf("  %-18s %s\n", "Log Level:", cfg.Logging.Level)
+
+	// --- Anti-Tamper Protection ---
+	atpStatus := "active"
+	if atp.SelfExeDeleted() {
+		atpStatus = "TAMPER DETECTED (Binary INode Replaced)"
+	}
+	fmt.Printf("  %-18s %s\n", "Anti-Tamper:", atpStatus)
 	fmt.Println()
 
 	// --- Database Server ---
@@ -75,7 +83,7 @@ func runStatus(cmd *cobra.Command, args []string) {
 		fmt.Println()
 	}
 
-	// --- Version Info (from disk) ---
+	// --- Version Info ---
 	printVersionInfo(cfg)
 	fmt.Println()
 
@@ -167,6 +175,7 @@ func printSignatureStats(data *protocol.StatusData) {
 	if total, ok := data.SignatureCounts["Total"]; ok && total > 0 && hasAny {
 		fmt.Println("    ─────────────────────")
 		fmt.Printf("    %-16s %d\n", "Total:", total)
+		fmt.Println("")
 	}
 }
 

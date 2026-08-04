@@ -121,11 +121,13 @@ chmod +x lmd-ng
 # Update signature databases
 ./lmd-ng update
 
-# Install services (requires sudo)
+# Install services (requires sudo) — ATP locks LMD-NG files against tampering
+sudo ./lmd-ng service install atp
 sudo ./lmd-ng service install dbs
 sudo ./lmd-ng service install rtp
 
 # Start services one-by-one
+sudo ./lmd-ng service start atp
 sudo ./lmd-ng service start dbs
 sudo ./lmd-ng service start rtp
 ```
@@ -137,12 +139,24 @@ sudo ./lmd-ng service start rtp
 .\lmd-ng.exe update
 
 # Install services
+.\lmd-ng.exe service install atp
 .\lmd-ng.exe service install dbs
 .\lmd-ng.exe service install rtp
 
 # Start services one-by-one
+.\lmd-ng.exe service start atp
 .\lmd-ng.exe service start dbs
 .\lmd-ng.exe service start rtp
+```
+
+### 🔐 Verifying Releases
+
+Release artifacts are published with a `checksums.txt` file. `lmd-ng upgrade`
+verifies the downloaded archive against `checksums.txt` automatically before
+replacing the binary. To verify a manual download:
+
+```bash
+sha256sum -c checksums.txt --ignore-missing
 ```
 
 ### 🏗️ **Build From Source**
@@ -162,7 +176,8 @@ make build
 LMD-NG is managed via a CLI:
 
 ### 💂‍♂️ Daemon Services
-*   **`lmd-ng daemon`**: Start both **DBS** (Server) and **RTP** (Client) in one process.
+*   **`lmd-ng daemon`**: Start **ATP** (Anti-Tamper Protection), **DBS** (Server), and **RTP** (Client) in one process. ATP starts first to lock files before DBS loads signatures.
+*   **`lmd-ng daemon atp`**: Start only the Anti-Tamper Protection daemon (locks critical files against tampering).
 *   **`lmd-ng daemon dbs`**: Start only the Database Signature Service.
 *   **`lmd-ng daemon rtp`**: Start only the Real-Time Protector (monitors file system).
 
@@ -183,15 +198,17 @@ LMD-NG is managed via a CLI:
 Manage LMD-NG components as background services (Systemd, Launchd, or Windows Services). Operations require elevated privileges.
 
 *   **Install Services**:
-    *   `lmd-ng service install`: Register both **DBS** and **RTP** services.
+    *   `lmd-ng service install`: Register **ATP**, **DBS**, and **RTP** services.
+    *   `lmd-ng service install atp`: Register only the Anti-Tamper Protection daemon.
     *   `lmd-ng service install dbs`: Register only the Database Signature Service (server).
     *   `lmd-ng service install rtp`: Register only the Real-Time Protector (client).
 *   **Control Services**:
-    *   `lmd-ng service start [dbs|rtp]`: Start services. If no component is specified, **DBS is started first**, followed by **RTP**.
-    *   `lmd-ng service stop [dbs|rtp]`: Stop services. If no component is specified, **RTP is stopped first**, followed by **DBS**.
-    *   `lmd-ng service restart [dbs|rtp]`: Restart services. If no component is specified, **DBS is restarted first**, followed by **RTP**.
+    *   `lmd-ng service start [atp|dbs|rtp]`: Start services. If no component is specified, **ATP is started first**, followed by **DBS**, then **RTP**.
+    *   `lmd-ng service stop [atp|dbs|rtp]`: Stop services. If no component is specified, **RTP is stopped first**, followed by **DBS**, then **ATP** (ATP releases last).
+    *   `lmd-ng service restart [atp|dbs|rtp]`: Restart services. If no component is specified, **ATP is restarted first**, followed by **DBS**, then **RTP**.
 *   **Uninstall Services**:
-    *   `lmd-ng service uninstall`: Stop and remove both **DBS** and **RTP** services. If no component is specified, **RTP is uninstalled first**, followed by **DBS**.
+    *   `lmd-ng service uninstall`: Stop and remove **ATP**, **DBS**, and **RTP** services. **RTP is uninstalled first**, followed by **DBS**, then **ATP**.
+    *   `lmd-ng service uninstall atp`: Stop and remove the Anti-Tamper Protection daemon.
     *   `lmd-ng service uninstall dbs`: Stop and remove only the Database Signature Service (server).
     *   `lmd-ng service uninstall rtp`: Stop and remove only the Real-Time Protector (client).
 
